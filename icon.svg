@@ -1,0 +1,125 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Background gradient -->
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a1a2e"/>
+      <stop offset="100%" style="stop-color:#16213e"/>
+    </linearGradient>
+    <!-- Bridge arc gradient -->
+    <linearGradient id="bridgeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#e8985a"/>
+      <stop offset="50%" style="stop-color:#d4845a"/>
+      <stop offset="100%" style="stop-color:#c47a5a"/>
+    </linearGradient>
+    <!-- Card glow -->
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <!-- Subtle shadow -->
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#000" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+
+  <!-- Background rounded square -->
+  <rect width="512" height="512" rx="108" fill="url(#bg)"/>
+
+  <!-- Subtle grid pattern suggesting kanban -->
+  <line x1="170" y1="100" x2="170" y2="412" stroke="#ffffff" stroke-opacity="0.04" stroke-width="1"/>
+  <line x1="256" y1="100" x2="256" y2="412" stroke="#ffffff" stroke-opacity="0.04" stroke-width="1"/>
+  <line x1="342" y1="100" x2="342" y2="412" stroke="#ffffff" stroke-opacity="0.04" stroke-width="1"/>
+
+  <!-- Left side: Notion-style page/card stack -->
+  <g filter="url(#shadow)">
+    <!-- Back card -->
+    <rect x="68" y="178" width="100" height="120" rx="10" fill="#2a2a4a" stroke="#ffffff" stroke-opacity="0.1" stroke-width="1"/>
+    <!-- Middle card -->
+    <rect x="78" y="168" width="100" height="120" rx="10" fill="#333358" stroke="#ffffff" stroke-opacity="0.12" stroke-width="1"/>
+    <!-- Front card (active ticket) -->
+    <rect x="88" y="158" width="100" height="120" rx="10" fill="#3d3d6b" stroke="#ffffff" stroke-opacity="0.15" stroke-width="1"/>
+    <!-- Card lines (text representation) -->
+    <rect x="102" y="174" width="56" height="6" rx="3" fill="#ffffff" fill-opacity="0.5"/>
+    <rect x="102" y="188" width="42" height="4" rx="2" fill="#ffffff" fill-opacity="0.2"/>
+    <rect x="102" y="198" width="50" height="4" rx="2" fill="#ffffff" fill-opacity="0.2"/>
+    <!-- Score badge -->
+    <circle cx="170" cy="258" r="12" fill="#e8985a" fill-opacity="0.9"/>
+    <text x="170" y="263" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="700" fill="#1a1a2e">8</text>
+  </g>
+
+  <!-- Bridge arc connecting left to right -->
+  <g>
+    <!-- Bridge cables/path -->
+    <path d="M 195 240 C 256 120, 256 120, 317 240" fill="none" stroke="url(#bridgeGrad)" stroke-width="5" stroke-linecap="round" opacity="0.9"/>
+    <!-- Bridge deck -->
+    <path d="M 195 248 L 317 248" fill="none" stroke="url(#bridgeGrad)" stroke-width="3" stroke-linecap="round" opacity="0.7"/>
+    <!-- Bridge supports -->
+    <line x1="220" y1="200" x2="220" y2="248" stroke="#e8985a" stroke-width="2" stroke-opacity="0.5"/>
+    <line x1="256" y1="165" x2="256" y2="248" stroke="#e8985a" stroke-width="2" stroke-opacity="0.5"/>
+    <line x1="292" y1="200" x2="292" y2="248" stroke="#e8985a" stroke-width="2" stroke-opacity="0.5"/>
+  </g>
+
+  <!-- Animated-looking data flow dots on bridge -->
+  <circle cx="220" cy="245" r="4" fill="#e8985a" filter="url(#glow)" opacity="0.9"/>
+  <circle cx="256" cy="245" r="5" fill="#f0a870" filter="url(#glow)" opacity="1"/>
+  <circle cx="292" cy="245" r="4" fill="#e8985a" filter="url(#glow)" opacity="0.9"/>
+
+  <!-- Right side: Terminal/CLI representation -->
+  <g filter="url(#shadow)">
+    <!-- Terminal window -->
+    <rect x="324" y="158" width="120" height="120" rx="10" fill="#1e1e3a" stroke="#e8985a" stroke-opacity="0.3" stroke-width="1.5"/>
+    <!-- Terminal title bar -->
+    <rect x="324" y="158" width="120" height="22" rx="10" fill="#2a2a4a"/>
+    <rect x="324" y="170" width="120" height="10" fill="#2a2a4a"/>
+    <!-- Traffic light dots -->
+    <circle cx="338" cy="169" r="4" fill="#ff5f57" opacity="0.8"/>
+    <circle cx="350" cy="169" r="4" fill="#febc2e" opacity="0.8"/>
+    <circle cx="362" cy="169" r="4" fill="#28c840" opacity="0.8"/>
+    <!-- Terminal prompt lines -->
+    <text x="336" y="200" font-family="'SF Mono', 'Menlo', monospace" font-size="11" fill="#28c840" opacity="0.9">$</text>
+    <rect x="348" y="193" width="50" height="5" rx="2" fill="#28c840" fill-opacity="0.4"/>
+    <text x="336" y="216" font-family="'SF Mono', 'Menlo', monospace" font-size="11" fill="#e8985a" opacity="0.7">&gt;</text>
+    <rect x="348" y="209" width="70" height="5" rx="2" fill="#e8985a" fill-opacity="0.3"/>
+    <rect x="348" y="222" width="40" height="5" rx="2" fill="#ffffff" fill-opacity="0.15"/>
+    <!-- Git branch indicator -->
+    <g transform="translate(336, 240)">
+      <path d="M 0 4 C 4 4, 4 0, 8 0 L 12 0" fill="none" stroke="#c47a5a" stroke-width="1.5" opacity="0.7"/>
+      <circle cx="0" cy="4" r="2.5" fill="#c47a5a" opacity="0.7"/>
+      <circle cx="14" cy="0" r="2.5" fill="#e8985a" opacity="0.9"/>
+    </g>
+    <rect x="356" y="236" width="56" height="5" rx="2" fill="#c47a5a" fill-opacity="0.3"/>
+  </g>
+
+  <!-- Bottom flow arrows: Review -> Scored -> Execute -> Done -->
+  <g transform="translate(86, 340)">
+    <!-- Status pills -->
+    <rect x="0" y="0" width="68" height="24" rx="12" fill="#3d3d6b" stroke="#ffffff" stroke-opacity="0.1" stroke-width="1"/>
+    <text x="34" y="16" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="9" font-weight="600" fill="#ffffff" fill-opacity="0.6">REVIEW</text>
+
+    <rect x="86" y="0" width="68" height="24" rx="12" fill="#e8985a" fill-opacity="0.2" stroke="#e8985a" stroke-opacity="0.4" stroke-width="1"/>
+    <text x="120" y="16" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="9" font-weight="600" fill="#e8985a" fill-opacity="0.9">SCORED</text>
+
+    <rect x="172" y="0" width="68" height="24" rx="12" fill="#3d3d6b" stroke="#ffffff" stroke-opacity="0.1" stroke-width="1"/>
+    <text x="206" y="16" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="9" font-weight="600" fill="#ffffff" fill-opacity="0.6">EXECUTE</text>
+
+    <rect x="258" y="0" width="68" height="24" rx="12" fill="#28c840" fill-opacity="0.15" stroke="#28c840" stroke-opacity="0.3" stroke-width="1"/>
+    <text x="292" y="16" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="9" font-weight="600" fill="#28c840" fill-opacity="0.8">DONE</text>
+
+    <!-- Flow arrows between pills -->
+    <path d="M 72 12 L 82 12" fill="none" stroke="#ffffff" stroke-opacity="0.2" stroke-width="1.5" marker-end="none"/>
+    <polygon points="82,9 86,12 82,15" fill="#ffffff" fill-opacity="0.2"/>
+
+    <path d="M 158 12 L 168 12" fill="none" stroke="#ffffff" stroke-opacity="0.2" stroke-width="1.5"/>
+    <polygon points="168,9 172,12 168,15" fill="#ffffff" fill-opacity="0.2"/>
+
+    <path d="M 244 12 L 254 12" fill="none" stroke="#ffffff" stroke-opacity="0.2" stroke-width="1.5"/>
+    <polygon points="254,9 258,12 254,15" fill="#ffffff" fill-opacity="0.2"/>
+  </g>
+
+  <!-- App name at bottom -->
+  <text x="256" y="420" text-anchor="middle" font-family="system-ui, -apple-system, 'SF Pro Display', sans-serif" font-size="28" font-weight="700" letter-spacing="2" fill="#ffffff" fill-opacity="0.85">CLAUDE BRIDGE</text>
+  <text x="256" y="442" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="400" letter-spacing="4" fill="#e8985a" fill-opacity="0.6">NOTION TO CLI</text>
+</svg>
