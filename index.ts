@@ -11,6 +11,7 @@ import {
   writeExecutionResults,
   moveTicketStatus,
   writeFailure,
+  addComment,
 } from './lib/notion.js';
 
 // Load .env.local
@@ -60,6 +61,7 @@ async function runReviewAgent(ticket: TicketDetails): Promise<void> {
   }
 
   log(CYAN, 'REVIEW', `Starting review for "${ticket.title}" in ${ticket.project}`);
+  const startTime = Date.now();
 
   const prompt = [
     reviewPrompt,
@@ -138,6 +140,17 @@ async function runReviewAgent(ticket: TicketDetails): Promise<void> {
   await writeReviewResults(ticket.id, results);
   await moveTicketStatus(ticket.id, CONFIG.COLUMNS.SCORED);
 
+  const duration = Math.round((Date.now() - startTime) / 1000);
+
+  // Add audit trail comment
+  const comment = [
+    '🔍 Review Complete',
+    `Ease: ${results.easeScore}/10 | Confidence: ${results.confidenceScore}/10`,
+    `Files: ${results.affectedFiles.length} analyzed`,
+    `Cost: $${cost.toFixed(2)} | Duration: ${duration}s`,
+  ].join('\n');
+  await addComment(ticket.id, comment);
+
   log(GREEN, 'REVIEW', `Done: ease=${results.easeScore} confidence=${results.confidenceScore} cost=$${cost.toFixed(2)}`);
 }
 
@@ -157,6 +170,7 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
   const branchName = `notion/${shortId}/${slug}`;
 
   log(MAGENTA, 'EXECUTE', `Starting execution for "${ticket.title}" on branch ${branchName}`);
+  const startTime = Date.now();
 
   // Move to In Progress immediately
   await moveTicketStatus(ticket.id, CONFIG.COLUMNS.IN_PROGRESS);
@@ -174,6 +188,7 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
   }
 
   let cost = 0;
+  let commitCount = 0;
 
   try {
     const prompt = [
@@ -226,14 +241,25 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
       }
     }
 
+    // Count commits made
+    try {
+      const commitLog = execSync(`git log main..${branchName} --oneline`, { cwd: projectDir, stdio: 'pipe' });
+      commitCount = commitLog.toString().trim().split('\n').filter(Boolean).length;
+    } catch {
+      // If branch doesn't exist or no commits, count is 0
+      commitCount = 0;
+    }
+
     // Post-execution: validate build
     const buildCmd = CONFIG.BUILD_COMMANDS[ticket.project];
+    let buildPassed = true;
     if (buildCmd) {
       log(YELLOW, 'VALIDATE', `Running: ${buildCmd}`);
       try {
         execSync(buildCmd, { cwd: projectDir, stdio: 'pipe', timeout: 120_000 });
         log(GREEN, 'VALIDATE', 'Build passed');
       } catch (e) {
+        buildPassed = false;
         const buildErr = e instanceof Error ? e.message : String(e);
         throw new Error(`Build validation failed: ${buildErr}`);
       }
@@ -279,8 +305,32 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
     await writeExecutionResults(ticket.id, { branch: branchName, cost, prUrl });
     await moveTicketStatus(ticket.id, CONFIG.COLUMNS.DONE);
 
+    const duration = Math.round((Date.now() - startTime) / 1000);
+
+    // Add success audit trail comment
+    const comment = [
+      '✅ Execute Complete',
+      `Branch: ${branchName}`,
+      prUrl ? `PR: ${prUrl}` : 'PR: Not created',
+      `Build: ${buildPassed ? 'PASS' : 'N/A'}`,
+      `Commits: ${commitCount}`,
+      `Cost: $${cost.toFixed(2)} | Duration: ${duration}s`,
+    ].join('\n');
+    await addComment(ticket.id, comment);
+
     log(GREEN, 'EXECUTE', `Done: branch=${branchName} cost=$${cost.toFixed(2)}${prUrl ? ` pr=${prUrl}` : ''}`);
   } catch (error) {
+    // On failure, add failure audit trail comment
+    const duration = Math.round((Date.now() - startTime) / 1000);
+    const errMsg = error instanceof Error ? error.message : String(error);
+    const comment = [
+      '❌ Execute Failed',
+      `Error: ${errMsg.slice(0, 500)}`,
+      `Phase: execution`,
+      `Cost: $${cost.toFixed(2)} | Duration: ${duration}s`,
+    ].join('\n');
+    await addComment(ticket.id, comment);
+
     // On failure, clean up: checkout main, optionally delete branch
     try {
       execSync('git checkout main', { cwd: projectDir, stdio: 'pipe' });
@@ -314,7 +364,8 @@ async function handleTicket(mode: 'review' | 'execute', ticket: TicketDetails): 
     return;
   }
 
-  activeLocks.set(lockKey, { mode, startedAt: Date.now() });
+  const lockEntry = { mode, startedAt: Date.now() };
+  activeLocks.set(lockKey, lockEntry);
   activeAgentCount++;
 
   try {
@@ -326,6 +377,18 @@ async function handleTicket(mode: 'review' | 'execute', ticket: TicketDetails): 
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     log(RED, 'FAILED', `${mode} failed for "${ticket.title}": ${errMsg}`);
+
+    // Add failure comment for review (execute handles its own failure comments)
+    if (mode === 'review') {
+      const duration = Math.round((Date.now() - lockEntry.startedAt) / 1000);
+      const comment = [
+        '❌ Review Failed',
+        `Error: ${errMsg.slice(0, 500)}`,
+        `Phase: review`,
+        `Duration: ${duration}s`,
+      ].join('\n');
+      await addComment(ticket.id, comment);
+    }
 
     try {
       await writeFailure(ticket.id, errMsg);
@@ -378,18 +441,30 @@ async function poll(): Promise<void> {
 
     if (DRY_RUN) return;
 
-    // Process tickets (one at a time per poll to avoid overload)
-    for (const ticket of pendingReview) {
-      if (shuttingDown) break;
-      const details = await fetchTicketDetails(ticket.id);
-      // Fire and forget - runs in background, lock prevents duplicates
-      handleTicket('review', details);
+    // Collect all pending tickets (review first, then execute)
+    const allPendingTickets = [
+      ...pendingReview.map((t) => ({ ticket: t, mode: 'review' as const })),
+      ...pendingExecute.map((t) => ({ ticket: t, mode: 'execute' as const })),
+    ];
+
+    // Launch agents up to concurrency limit
+    const availableSlots = CONFIG.MAX_CONCURRENT_AGENTS - activeLocks.size;
+    const ticketsToProcess = allPendingTickets.slice(0, Math.max(0, availableSlots));
+
+    if (ticketsToProcess.length > 0) {
+      log(CYAN, 'QUEUE', `Launching ${ticketsToProcess.length} agent(s) (${activeLocks.size} already running, ${CONFIG.MAX_CONCURRENT_AGENTS} max)`);
     }
 
-    for (const ticket of pendingExecute) {
+    if (ticketsToProcess.length < allPendingTickets.length) {
+      const queued = allPendingTickets.length - ticketsToProcess.length;
+      log(YELLOW, 'QUEUE', `${queued} ticket(s) queued for next poll (concurrency limit reached)`);
+    }
+
+    // Fire and forget - runs in background, lock prevents duplicates
+    for (const { ticket, mode } of ticketsToProcess) {
       if (shuttingDown) break;
       const details = await fetchTicketDetails(ticket.id);
-      handleTicket('execute', details);
+      handleTicket(mode, details);
     }
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
@@ -444,6 +519,7 @@ async function main(): Promise<void> {
   console.log('');
   log(GREEN, 'START', 'Notion-Claude Bridge');
   log(DIM, 'CONFIG', `Poll interval: ${CONFIG.POLL_INTERVAL_MS / 1000}s`);
+  log(DIM, 'CONFIG', `Max concurrent agents: ${CONFIG.MAX_CONCURRENT_AGENTS}`);
   log(DIM, 'CONFIG', `Projects: ${Object.keys(CONFIG.PROJECTS).join(', ')}`);
   log(DIM, 'CONFIG', `Review budget: $${CONFIG.REVIEW_BUDGET_USD} / Execute budget: $${CONFIG.EXECUTE_BUDGET_USD}`);
   if (DRY_RUN) log(YELLOW, 'CONFIG', 'DRY-RUN mode: polling only, no agents will run');

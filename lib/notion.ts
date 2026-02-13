@@ -246,6 +246,22 @@ export async function writeFailure(pageId: string, error: string): Promise<void>
   });
 }
 
+/**
+ * Add a comment to a Notion page (best-effort).
+ * Used for agent audit trail - does not throw if it fails.
+ */
+export async function addComment(pageId: string, text: string): Promise<void> {
+  try {
+    await notion().comments.create({
+      parent: { page_id: pageId },
+      rich_text: [{ text: { content: text } }],
+    });
+  } catch (e) {
+    // Best-effort: log but don't throw
+    console.warn(`[NOTION] Failed to add comment to ${pageId}:`, e);
+  }
+}
+
 function truncate(str: string, maxLen: number): string {
   if (str.length <= maxLen) return str;
   return str.slice(0, maxLen - 3) + '...';

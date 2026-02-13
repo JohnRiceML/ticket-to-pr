@@ -33,6 +33,9 @@ export const CONFIG = {
 
   // Stale lock timeout (30 minutes)
   STALE_LOCK_MS: 30 * 60 * 1000,
+
+  // Maximum concurrent agents (review + execute combined)
+  MAX_CONCURRENT_AGENTS: 3,
 } as const;
 
 // JSON schema for review agent structured output

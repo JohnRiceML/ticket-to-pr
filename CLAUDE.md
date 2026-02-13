@@ -66,6 +66,169 @@ npx tsx index.ts --once
 npx tsx index.ts
 ```
 
+## Testing & Verification
+
+After completing setup, run this end-to-end test to verify the bridge works correctly. This test creates a simple ticket, runs it through the full review-and-execute pipeline, and validates all integrations.
+
+### Pre-flight Checklist
+
+Verify all dependencies are working before testing:
+
+```bash
+# Node.js 18+ installed
+node --version
+# Should output v18.x.x or higher
+
+# Claude CLI installed
+claude --version
+# Should output version number
+
+# GitHub CLI authenticated
+gh auth status
+# Should show "Logged in to github.com as yourname"
+
+# Notion connection working
+npx tsx index.ts --dry-run --once
+# Should connect without errors and report "No tickets to process"
+```
+
+If any command fails, revisit the Prerequisites and Setup sections.
+
+### Test Ticket Template
+
+Create a new ticket in your Notion board with these exact values:
+
+| Field | Value |
+|-------|-------|
+| **Name** | Add a health check endpoint |
+| **Project** | `PeekABoo` (or your project name from `config.ts` — must match exactly) |
+| **Description** | Create a GET endpoint at /api/health that returns { status: "ok", timestamp: <current ISO timestamp> }. No auth required. |
+| **Status** | Backlog (default) |
+
+### Step-by-Step Test Flow
+
+#### Step 1: Test Review Agent
+
+1. **Drag the ticket to "Review" column** in Notion
+2. **Run the bridge once**:
+   ```bash
+   npx tsx index.ts --once
+   ```
+3. **Watch the terminal output** — you should see:
+   ```
+   [POLL] Fetching tickets from Notion...
+   [REVIEW] Processing ticket: Add a health check endpoint
+   [REVIEW] Running review agent for project: PeekABoo
+   [REVIEW] Agent completed successfully
+   [REVIEW] Updated ticket with scores and analysis
+   ```
+4. **Verify in Notion** (refresh the page):
+   - Status: **Scored**
+   - Ease: number between 1-10 (typically 8-10 for simple tasks)
+   - Confidence: number between 1-10 (typically 8-10 for clear requirements)
+   - Spec: multi-line implementation plan (file to create, code structure, etc.)
+   - Impact: list of affected files and risks
+   - Cost: ~$0.15-0.25
+
+#### Step 2: Test Execute Agent
+
+1. **Review the scores and spec** — make sure they look reasonable
+2. **Drag the ticket to "Execute" column** in Notion
+3. **Run the bridge again**:
+   ```bash
+   npx tsx index.ts --once
+   ```
+4. **Watch the terminal output** — you should see:
+   ```
+   [EXECUTE] Processing ticket: Add a health check endpoint
+   [EXECUTE] Running execute agent for project: PeekABoo
+   [EXECUTE] Agent completed successfully
+   [BUILD] Running build validation: npm run build
+   [BUILD] Build passed
+   [GIT] Pushing branch: notion/abc12345/add-a-health-check-endpoint
+   [PR] Created pull request: https://github.com/yourname/PeekABoo/pull/123
+   [EXECUTE] Ticket moved to Done
+   ```
+5. **Verify in Notion** (refresh the page):
+   - Status: **Done**
+   - Branch: `notion/abc12345/add-a-health-check-endpoint` (actual ID will vary)
+   - Cost: updated with execute cost (~$0.20-0.30 added, ~$0.40-0.55 total)
+   - PR URL: populated with GitHub pull request link
+
+#### Step 3: Review the PR on GitHub
+
+1. **Click the PR URL** in the Notion ticket
+2. **Verify the PR contains**:
+   - A new file like `app/api/health/route.ts` or similar
+   - Code that returns `{ status: "ok", timestamp: <ISO timestamp> }`
+   - PR description with spec, impact, Notion link, and cost
+3. **Check the Files Changed tab** — should show only the new endpoint file
+4. **Verify the code quality**:
+   - Proper TypeScript types
+   - Correct Next.js route handler pattern (if Next.js project)
+   - No unrelated changes
+
+#### Step 4: Clean Up
+
+1. **Merge or close the test PR**:
+   ```bash
+   # Close without merging
+   gh pr close 123
+
+   # Or merge if you want to keep the health check endpoint
+   gh pr merge 123 --squash
+   ```
+2. **Delete the test branch locally**:
+   ```bash
+   cd ~/Projects/PeekABoo  # Or your project path
+   git checkout main
+   git branch -D notion/abc12345/add-a-health-check-endpoint
+   ```
+3. **Delete the health check endpoint file** (if you closed the PR):
+   ```bash
+   rm app/api/health/route.ts  # Adjust path based on what was created
+   ```
+4. **Delete the test ticket** in Notion (click "..." -> Delete)
+
+### Expected Costs
+
+Based on this simple test ticket:
+
+- **Review agent**: $0.15 - $0.25
+- **Execute agent**: $0.20 - $0.30
+- **Total test cost**: ~$0.35 - $0.55
+
+More complex tickets will cost more, but should stay well within the budget limits ($2 review, $15 execute).
+
+### Common First-Run Issues
+
+| Error | Cause | Quick Fix |
+|-------|-------|-----------|
+| **"API token is invalid"** | Wrong Notion token or integration not connected | Check `.env.local`, reconnect integration in Notion ("..." -> Connections) |
+| **"Unknown project: PeekABoo"** | Project field doesn't match `config.ts` | Project name is case-sensitive — must match exactly |
+| **"Claude Code process exited with code 1"** | Claude CLI not authenticated | Run `claude "test"` manually to verify authentication |
+| **PR URL empty after Done** | GitHub CLI not authenticated | Run `gh auth login` and follow browser authentication |
+| **"Build validation failed"** | Build command not configured or project has existing build errors | Check `BUILD_COMMANDS` in `config.ts`, ensure `main` branch builds successfully |
+| **Ticket stuck in "In Progress"** | Agent crashed mid-execution | Check logs for errors, drag ticket back to Execute to retry |
+| **No output in terminal** | Wrong database ID or token | Verify `NOTION_DATABASE_ID` in `.env.local` matches your board URL |
+
+### Success Criteria
+
+Your test is successful when all of these are true:
+
+- Review agent fills in Ease, Confidence, Spec, Impact, and Cost
+- Ticket moves from Review -> Scored automatically
+- Execute agent creates a branch and implements the endpoint
+- Build validation passes
+- Branch is pushed to GitHub
+- PR is created automatically
+- Ticket moves from Execute -> In Progress -> Done
+- PR URL is populated in the ticket
+- Code in the PR matches the ticket description
+- Total cost is reasonable (~$0.35-0.55 for this simple task)
+
+If all criteria pass, the bridge is working correctly and ready for real tickets.
+
 ## Setup
 
 ### 1. Create Notion Integration
