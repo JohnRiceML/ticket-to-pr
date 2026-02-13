@@ -42,9 +42,10 @@ export const CONFIG = {
   },
 
   // Project name (Notion select) -> local directory
+  // Example:
+  //   'MyApp': '/Users/yourname/Projects/MyApp',
   PROJECTS: {
-    'PeekABoo': '/Users/johnrice/Projects/PeekABoo',
-    // Add more projects here
+    // Add your projects here
   } as Record<string, string>,
 
   // Agent budgets
@@ -57,7 +58,7 @@ export const CONFIG = {
 
   // Build validation command per project (optional)
   BUILD_COMMANDS: {
-    'PeekABoo': 'npm run build',
+    // Example: 'MyApp': 'npm run build',
   } as Record<string, string>,
 
   // Stale lock timeout (30 minutes)

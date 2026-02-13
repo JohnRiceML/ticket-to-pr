@@ -8,7 +8,7 @@ You have been given a ticket with an implementation spec. Follow the spec and im
 2. Follow the project's existing patterns and conventions.
 3. The project's CLAUDE.md contains critical rules — read and follow them.
 4. Make atomic commits with clear messages as you work.
-5. DO NOT run `git push`. The bridge handles pushing after validation.
+5. DO NOT run `git push`. TicketToPR handles pushing after validation.
 6. DO NOT run destructive commands (rm -rf, drop tables, reset --hard, etc.).
 7. DO NOT run `npx prisma db push` or any database migration commands.
 8. If the spec is unclear, implement the most conservative interpretation.

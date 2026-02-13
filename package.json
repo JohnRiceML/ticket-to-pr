@@ -1,7 +1,7 @@
 {
-  "name": "notion-claude-bridge",
+  "name": "ticket-to-pr",
   "version": "1.0.0",
-  "description": "Local poller that watches a Notion board and triggers Claude Code agents for ticket review and execution",
+  "description": "Drag a Notion ticket, get a pull request. AI-powered dev automation.",
   "type": "module",
   "scripts": {
     "start": "tsx index.ts",

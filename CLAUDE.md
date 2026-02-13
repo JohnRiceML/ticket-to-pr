@@ -1,12 +1,12 @@
-# Notion-Claude Bridge
+# TicketToPR
 
-**Stop context-switching. Let AI clear your backlog while you ship what matters.**
+**Drag a Notion ticket. Get a pull request.**
 
-Every dev has a backlog full of tasks they know exactly how to do but never have time for — add an endpoint, wire up a new field, fix that copy, refactor that util. Notion-Claude Bridge clears that pile. Write a ticket in Notion, drag it to a column, and Claude handles the implementation end-to-end: branch, code, build validation, PR. You review and merge. That's it.
+Every dev has a backlog full of tasks they know exactly how to do but never have time for — add an endpoint, wire up a new field, fix that copy, refactor that util. TicketToPR clears that pile. Write a ticket in Notion, drag it to a column, and Claude handles the implementation end-to-end: branch, code, build validation, PR. You review and merge. That's it.
 
 ### For developers
 
-You're deep in a complex feature when a PM drops three "quick" tickets in your backlog. Each one is 20 minutes of context-switching you can't afford. With the bridge, you toss them on the board, drag to Review, glance at the feasibility scores over coffee, drag to Execute, and merge the PRs when you're ready. Your flow stays unbroken.
+You're deep in a complex feature when a PM drops three "quick" tickets in your backlog. Each one is 20 minutes of context-switching you can't afford. With TicketToPR, you toss them on the board, drag to Review, glance at the feasibility scores over coffee, drag to Execute, and merge the PRs when you're ready. Your flow stays unbroken.
 
 - **Offload the simple stuff** — endpoint scaffolding, config changes, copy updates, bug fixes with clear repro steps
 - **AI scores before AI codes** — every ticket gets an ease/confidence rating and implementation spec before a single line is written
@@ -16,7 +16,7 @@ You're deep in a complex feature when a PM drops three "quick" tickets in your b
 ### For teams and businesses
 
 - **Anyone can write a ticket** — PMs, designers, and founders can request changes through Notion without touching a terminal
-- **Async AI development** — the bridge runs in the background, processing tickets while your team sleeps
+- **Async AI development** — TicketToPR runs in the background, processing tickets while your team sleeps
 - **Cost transparency** — every ticket shows exactly what it cost ($0.35-0.55 for simple tasks)
 - **Human-in-the-loop** — nothing merges without a developer reviewing the PR
 
@@ -43,7 +43,7 @@ You need all of these installed and working before setup:
 | **GitHub CLI** (required for PRs) | `brew install gh` | `gh auth status` |
 | **Notion account** | https://notion.so | Can access a workspace |
 
-The Claude CLI must be authenticated with an API key or Anthropic account that has credits. The bridge spawns Claude agents via the SDK which bills against your account.
+The Claude CLI must be authenticated with an API key or Anthropic account that has credits. TicketToPR spawns Claude agents via the SDK which bills against your account.
 
 The GitHub CLI must be authenticated for automatic PR creation. Run `gh auth login`, choose **GitHub.com**, **HTTPS**, and authenticate via browser. Verify with `gh auth status`.
 
@@ -79,8 +79,8 @@ The human decision point is between **Scored** and **Execute**. You always revie
 ## Quick Start
 
 ```bash
-git clone <repo-url> ~/Projects/notion-claude-bridge
-cd ~/Projects/notion-claude-bridge
+git clone <repo-url> ~/Projects/ticket-to-pr
+cd ~/Projects/ticket-to-pr
 npm install
 cp .env.local.example .env.local   # Then edit with your tokens (see Setup below)
 
@@ -96,7 +96,7 @@ npx tsx index.ts
 
 ## Testing & Verification
 
-After completing setup, run this end-to-end test to verify the bridge works correctly. This test creates a simple ticket, runs it through the full review-and-execute pipeline, and validates all integrations.
+After completing setup, run this end-to-end test to verify TicketToPR works correctly. This test creates a simple ticket, runs it through the full review-and-execute pipeline, and validates all integrations.
 
 ### Pre-flight Checklist
 
@@ -138,7 +138,7 @@ Create a new ticket in your Notion board with these exact values:
 #### Step 1: Test Review Agent
 
 1. **Drag the ticket to "Review" column** in Notion
-2. **Run the bridge once**:
+2. **Run TicketToPR once**:
    ```bash
    npx tsx index.ts --once
    ```
@@ -162,7 +162,7 @@ Create a new ticket in your Notion board with these exact values:
 
 1. **Review the scores and spec** — make sure they look reasonable
 2. **Drag the ticket to "Execute" column** in Notion
-3. **Run the bridge again**:
+3. **Run TicketToPR again**:
    ```bash
    npx tsx index.ts --once
    ```
@@ -255,7 +255,7 @@ Your test is successful when all of these are true:
 - Code in the PR matches the ticket description
 - Total cost is reasonable (~$0.35-0.55 for this simple task)
 
-If all criteria pass, the bridge is working correctly and ready for real tickets.
+If all criteria pass, TicketToPR is working correctly and ready for real tickets.
 
 ## Setup
 
@@ -313,7 +313,7 @@ NOTION_DATABASE_ID=your_32_char_hex_database_id
 
 ### 4. Authenticate GitHub CLI
 
-The bridge auto-creates pull requests after pushing. This requires `gh` to be authenticated:
+TicketToPR auto-creates pull requests after pushing. This requires `gh` to be authenticated:
 
 ```bash
 gh auth login
@@ -369,35 +369,35 @@ npx tsx index.ts --dry-run --once
 For always-on operation, use launchd. A plist is provided at:
 
 ```
-~/Library/LaunchAgents/com.notion-claude-bridge.plist
+~/Library/LaunchAgents/com.ticket-to-pr.plist
 ```
 
 **Commands:**
 
 ```bash
 # Start (also starts automatically on login)
-launchctl load ~/Library/LaunchAgents/com.notion-claude-bridge.plist
+launchctl load ~/Library/LaunchAgents/com.ticket-to-pr.plist
 
 # Stop
-launchctl unload ~/Library/LaunchAgents/com.notion-claude-bridge.plist
+launchctl unload ~/Library/LaunchAgents/com.ticket-to-pr.plist
 
 # Check status
 launchctl list | grep notion
 
 # Watch logs
-tail -f ~/Projects/notion-claude-bridge/bridge.log
+tail -f ~/Projects/ticket-to-pr/bridge.log
 ```
 
 If you cloned this repo fresh, create the plist:
 
 ```bash
-cat > ~/Library/LaunchAgents/com.notion-claude-bridge.plist << 'EOF'
+cat > ~/Library/LaunchAgents/com.ticket-to-pr.plist << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.notion-claude-bridge</string>
+    <string>com.ticket-to-pr</string>
     <key>ProgramArguments</key>
     <array>
         <string>npx</string>
@@ -405,15 +405,15 @@ cat > ~/Library/LaunchAgents/com.notion-claude-bridge.plist << 'EOF'
         <string>index.ts</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Users/YOUR_USERNAME/Projects/notion-claude-bridge</string>
+    <string>/Users/YOUR_USERNAME/Projects/ticket-to-pr</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/Users/YOUR_USERNAME/Projects/notion-claude-bridge/bridge.log</string>
+    <string>/Users/YOUR_USERNAME/Projects/ticket-to-pr/bridge.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/YOUR_USERNAME/Projects/notion-claude-bridge/bridge.log</string>
+    <string>/Users/YOUR_USERNAME/Projects/ticket-to-pr/bridge.log</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
@@ -489,7 +489,7 @@ All settings in `config.ts`:
 ## File Structure
 
 ```
-notion-claude-bridge/
+ticket-to-pr/
   index.ts              # Poll loop, agent runner, git workflow, graceful shutdown
   config.ts             # Project mappings, budgets, column names, TypeScript types
   lib/
@@ -539,11 +539,11 @@ No other code changes needed.
 **"API token is invalid"**
 - Check `.env.local` has the correct `ntn_` token
 - Make sure the integration is connected to the database ("..." -> Connections)
-- Token is loaded lazily — if you edit `.env.local`, restart the bridge
+- Token is loaded lazily — if you edit `.env.local`, restart TicketToPR
 
 **"Claude Code process exited with code 1"**
 - Check `bridge.log` or terminal stderr for the actual error
-- Common cause: running inside another Claude Code session (the bridge handles this, but nested agents may still conflict)
+- Common cause: running inside another Claude Code session (TicketToPR handles this, but nested agents may still conflict)
 - Make sure `claude` CLI is authenticated: run `claude "test"` manually
 
 **Ticket stuck in "In Progress"**
@@ -569,9 +569,9 @@ No other code changes needed.
 - PR creation is best-effort — the ticket still moves to Done without it
 
 **launchd service not starting**
-- Validate plist: `plutil -lint ~/Library/LaunchAgents/com.notion-claude-bridge.plist`
+- Validate plist: `plutil -lint ~/Library/LaunchAgents/com.ticket-to-pr.plist`
 - Check PATH includes your Node.js binary directory
-- Check logs: `tail -f ~/Projects/notion-claude-bridge/bridge.log`
+- Check logs: `tail -f ~/Projects/ticket-to-pr/bridge.log`
 
 ## Costs
 

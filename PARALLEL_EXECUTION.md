@@ -2,7 +2,7 @@
 
 ## Overview
 
-The bridge now supports processing multiple tickets concurrently with a configurable limit. This improves throughput when multiple tickets are waiting in the Review or Execute columns.
+TicketToPR now supports processing multiple tickets concurrently with a configurable limit. This improves throughput when multiple tickets are waiting in the Review or Execute columns.
 
 ## Configuration
 
@@ -118,7 +118,7 @@ for (const { ticket, mode } of ticketsToProcess) {
 
 ### Startup
 ```
-14:06:00 [START] Notion-Claude Bridge
+14:06:00 [START] TicketToPR
 14:06:00 [CONFIG] Poll interval: 30s
 14:06:00 [CONFIG] Max concurrent agents: 3
 14:06:00 [CONFIG] Projects: PeekABoo

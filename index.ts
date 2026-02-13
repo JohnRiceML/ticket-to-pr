@@ -529,7 +529,7 @@ async function main(): Promise<void> {
   }
 
   console.log('');
-  log(GREEN, 'START', `Notion-Claude Bridge ${pro ? '(Pro)' : '(Free)'}`);
+  log(GREEN, 'START', `TicketToPR ${pro ? '(Pro)' : '(Free)'}`);
   log(DIM, 'CONFIG', `Poll interval: ${CONFIG.POLL_INTERVAL_MS / 1000}s`);
   log(DIM, 'CONFIG', `Max concurrent agents: ${CONFIG.MAX_CONCURRENT_AGENTS}${pro ? '' : ' (upgrade to Pro for up to 10)'}`);
   log(DIM, 'CONFIG', `Projects: ${projectNames.join(', ')}`);
