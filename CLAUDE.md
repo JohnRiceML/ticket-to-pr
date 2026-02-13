@@ -12,10 +12,12 @@ You need all of these installed and working before setup:
 | **Claude Code CLI** | `npm install -g @anthropic-ai/claude-code` | `claude --version` |
 | **Claude authentication** | `claude` (follow login prompts) | `claude "hello"` returns a response |
 | **Git** | https://git-scm.com | `git --version` |
-| **GitHub CLI** (optional, for PRs) | `brew install gh` | `gh auth status` |
+| **GitHub CLI** (required for PRs) | `brew install gh` | `gh auth status` |
 | **Notion account** | https://notion.so | Can access a workspace |
 
 The Claude CLI must be authenticated with an API key or Anthropic account that has credits. The bridge spawns Claude agents via the SDK which bills against your account.
+
+The GitHub CLI must be authenticated for automatic PR creation. Run `gh auth login`, choose **GitHub.com**, **HTTPS**, and authenticate via browser. Verify with `gh auth status`.
 
 ## What It Does
 
@@ -37,8 +39,8 @@ Execute         Poller picks up ticket. Claude creates branch, implements code,
 In Progress     Set immediately when execute agent starts working.
    |
    v
-Done            Branch pushed to origin. Branch name + cost on ticket.
-                Ready for human code review / PR.
+Done            Branch pushed to origin. PR auto-created on GitHub.
+                Branch name, cost, and PR link on ticket.
 
 Failed          Agent errored. Error details in Impact field.
                 Drag back to Review or Execute to retry.
@@ -92,6 +94,7 @@ Create a new **Board view** database in Notion. Then add these properties:
 | `Impact` | Text | Files affected + risks, written by review agent |
 | `Branch` | Text | Git branch name, written by execute agent |
 | `Cost` | Text | USD spent on the Claude run |
+| `PR` | URL | GitHub pull request link, written by execute agent |
 
 **Add these 7 status columns** (rename defaults + add new ones):
 
@@ -117,7 +120,23 @@ NOTION_TOKEN=ntn_your_token_here
 NOTION_DATABASE_ID=your_32_char_hex_database_id
 ```
 
-### 4. Register Your Projects
+### 4. Authenticate GitHub CLI
+
+The bridge auto-creates pull requests after pushing. This requires `gh` to be authenticated:
+
+```bash
+gh auth login
+# Choose: GitHub.com → HTTPS → Authenticate via browser
+```
+
+Verify it works:
+
+```bash
+gh auth status
+# Should show: Logged in to github.com as yourname
+```
+
+### 5. Register Your Projects
 
 Edit `config.ts` — add your project to `PROJECTS` and optionally `BUILD_COMMANDS`:
 
@@ -135,14 +154,14 @@ BUILD_COMMANDS: {
 
 The `Project` field on each Notion ticket must match a key in `PROJECTS` exactly (case-sensitive). Each project directory must be a git repo with an `origin` remote.
 
-### 5. Verify
+### 6. Verify
 
 ```bash
 # Should connect to Notion and report "No tickets to process"
 npx tsx index.ts --dry-run --once
 ```
 
-### 6. Create a Test Ticket
+### 7. Create a Test Ticket
 
 1. Click "+ New" on your Notion board
 2. Name: "Add a hello world test endpoint"
@@ -152,7 +171,7 @@ npx tsx index.ts --dry-run --once
 6. Run `npx tsx index.ts --once` and watch it score the ticket
 7. Check Notion — ticket should be in **Scored** with Ease, Confidence, Spec, Impact filled in
 8. Drag to **Execute**, run `npx tsx index.ts --once` again
-9. Check Notion — ticket should be in **Done** with Branch and Cost filled in
+9. Check Notion — ticket should be in **Done** with Branch, Cost, and PR link filled in
 
 ## Running as a Background Service (macOS)
 
@@ -252,9 +271,14 @@ Replace `YOUR_USERNAME` and update the PATH to include your Node.js bin director
 1. Bridge creates branch `notion/{8-char-id}/{ticket-slug}` from main
 2. Claude implements changes, makes atomic commits
 3. Bridge runs build command (if configured for the project)
-4. Build passes: bridge pushes, ticket -> Done
-5. Build fails: branch kept locally, ticket -> Failed
-6. Always checks out main when done
+4. Build passes: bridge pushes branch to origin
+5. Bridge creates a GitHub PR via `gh pr create` (includes spec, impact, Notion link, cost)
+6. PR URL written back to the ticket's `PR` property
+7. Ticket moves to Done with branch name, cost, and PR link
+8. Build fails: branch kept locally, ticket -> Failed
+9. Always checks out main when done
+
+**PR creation is best-effort** — if `gh` isn't authenticated or the push target has no GitHub remote, the ticket still moves to Done with the branch name. You can always create a PR manually.
 
 ## Configuration Reference
 
@@ -315,6 +339,7 @@ No other code changes needed.
 | Execute agent fails | Checks out main, ticket -> Failed |
 | Build validation fails | Ticket -> Failed, branch kept locally for inspection |
 | Push fails | Ticket -> Failed, branch remains local |
+| PR creation fails | Ticket still moves to Done (best-effort), logged as warning |
 | Duplicate poll trigger | Skipped (in-memory lock per ticket ID) |
 | Agent hangs > 30 min | Lock force-released, ticket -> Failed |
 
@@ -344,6 +369,14 @@ No other code changes needed.
 - Check the branch locally: `git log notion/... --oneline`
 - Run the build manually to see the actual error
 
+**PR not created after push**
+- Make sure `gh` is installed: `brew install gh`
+- Make sure `gh` is authenticated: `gh auth login`
+- Verify with `gh auth status` — should show "Logged in to github.com"
+- The project repo must have a GitHub `origin` remote
+- Check logs for `[PR] Failed to create PR:` messages
+- PR creation is best-effort — the ticket still moves to Done without it
+
 **launchd service not starting**
 - Validate plist: `plutil -lint ~/Library/LaunchAgents/com.notion-claude-bridge.plist`
 - Check PATH includes your Node.js binary directory
@@ -364,7 +397,6 @@ First end-to-end test (hello world endpoint): **$0.49 total** ($0.22 review + $0
 
 ## Future Enhancements
 
-- Auto-create PRs with `gh pr create` after push
 - Write agent logs as Notion page comments for audit trail
 - Parallel ticket execution (configurable concurrency limit)
 - Auto-retry failed tickets with exponential backoff
