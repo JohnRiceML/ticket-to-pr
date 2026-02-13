@@ -1,6 +1,29 @@
 # Notion-Claude Bridge
 
-A local TypeScript poller that watches a Notion kanban board and triggers Claude Code agents to review and implement tickets automatically. Drag a ticket into "Review" and get a feasibility score, spec, and impact analysis. Drag it into "Execute" and Claude creates a branch, implements the code, validates the build, and pushes.
+**Turn your Notion board into an AI-powered development team.**
+
+Notion-Claude Bridge is a local automation tool that connects your Notion kanban board to Claude Code agents. Write a ticket, drag it into a column, and AI handles the rest — from feasibility analysis to working code on a branch with a pull request ready for review.
+
+### Who it's for
+
+- **Solo developers** who want to offload routine tasks while they focus on architecture
+- **Small teams** where anyone can write a ticket and get AI-implemented code back
+- **Agencies and consultancies** that want to prototype faster with AI-assisted development
+- **Engineering managers** who want to triage tickets with AI-generated feasibility scores before assigning work
+
+### Why it matters
+
+Most AI coding tools require you to sit in a terminal and prompt the AI yourself. Notion-Claude Bridge removes that bottleneck — your entire team can request code changes through a familiar Notion board, and the AI works asynchronously in the background. You stay in control: every ticket gets a feasibility score and spec before any code is written, and every change lands on a feature branch with a PR for human review.
+
+### How it works
+
+1. **Write a ticket** in Notion with a title, description, and project name
+2. **Drag to Review** — Claude reads your codebase and scores the ticket (ease, confidence, spec, risks)
+3. **Read the scores** — decide if the AI's plan makes sense before any code is written
+4. **Drag to Execute** — Claude creates a branch, implements the code, validates the build, pushes, and opens a PR
+5. **Review the PR** — merge when you're happy, or drag back to iterate
+
+Every step is logged on the ticket: scores, cost, branch name, PR link, and agent comments for full audit trail. Typical cost: **$0.35 - $0.55 per ticket** for simple tasks.
 
 ## Prerequisites
 
