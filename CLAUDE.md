@@ -1,19 +1,24 @@
 # Notion-Claude Bridge
 
-**Turn your Notion board into an AI-powered development team.**
+**Stop context-switching. Let AI clear your backlog while you ship what matters.**
 
-Notion-Claude Bridge is a local automation tool that connects your Notion kanban board to Claude Code agents. Write a ticket, drag it into a column, and AI handles the rest — from feasibility analysis to working code on a branch with a pull request ready for review.
+Every dev has a backlog full of tasks they know exactly how to do but never have time for — add an endpoint, wire up a new field, fix that copy, refactor that util. Notion-Claude Bridge clears that pile. Write a ticket in Notion, drag it to a column, and Claude handles the implementation end-to-end: branch, code, build validation, PR. You review and merge. That's it.
 
-### Who it's for
+### For developers
 
-- **Solo developers** who want to offload routine tasks while they focus on architecture
-- **Small teams** where anyone can write a ticket and get AI-implemented code back
-- **Agencies and consultancies** that want to prototype faster with AI-assisted development
-- **Engineering managers** who want to triage tickets with AI-generated feasibility scores before assigning work
+You're deep in a complex feature when a PM drops three "quick" tickets in your backlog. Each one is 20 minutes of context-switching you can't afford. With the bridge, you toss them on the board, drag to Review, glance at the feasibility scores over coffee, drag to Execute, and merge the PRs when you're ready. Your flow stays unbroken.
 
-### Why it matters
+- **Offload the simple stuff** — endpoint scaffolding, config changes, copy updates, bug fixes with clear repro steps
+- **AI scores before AI codes** — every ticket gets an ease/confidence rating and implementation spec before a single line is written
+- **Your codebase, your rules** — Claude reads your project's CLAUDE.md and follows your conventions. Build must pass before anything pushes.
+- **Full audit trail** — cost, duration, scores, and agent logs posted right on the Notion ticket
 
-Most AI coding tools require you to sit in a terminal and prompt the AI yourself. Notion-Claude Bridge removes that bottleneck — your entire team can request code changes through a familiar Notion board, and the AI works asynchronously in the background. You stay in control: every ticket gets a feasibility score and spec before any code is written, and every change lands on a feature branch with a PR for human review.
+### For teams and businesses
+
+- **Anyone can write a ticket** — PMs, designers, and founders can request changes through Notion without touching a terminal
+- **Async AI development** — the bridge runs in the background, processing tickets while your team sleeps
+- **Cost transparency** — every ticket shows exactly what it cost ($0.35-0.55 for simple tasks)
+- **Human-in-the-loop** — nothing merges without a developer reviewing the PR
 
 ### How it works
 
