@@ -1,3 +1,32 @@
+// -- License --
+
+import { verify } from 'node:crypto';
+
+const LICENSE_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAGtiFnwyCAHWl1b1yzm2wY14LiY8e0xfsXhQULcRaStM=
+-----END PUBLIC KEY-----`;
+
+export function isPro(): boolean {
+  const key = process.env.LICENSE_KEY;
+  if (!key?.startsWith('ncb_pro_')) return false;
+
+  const rest = key.slice('ncb_pro_'.length);
+  const dotIndex = rest.indexOf('.');
+  if (dotIndex === -1) return false;
+
+  try {
+    const buyerId = Buffer.from(rest.slice(0, dotIndex), 'base64url');
+    const signature = Buffer.from(rest.slice(dotIndex + 1), 'base64url');
+    return verify(null, buyerId, LICENSE_PUBLIC_KEY, signature);
+  } catch {
+    return false;
+  }
+}
+
+const FREE_MAX_PROJECTS = 1;
+const FREE_MAX_CONCURRENT = 1;
+const PRO_MAX_CONCURRENT = 10;
+
 export const CONFIG = {
   // Polling
   POLL_INTERVAL_MS: 30_000,
@@ -35,7 +64,12 @@ export const CONFIG = {
   STALE_LOCK_MS: 30 * 60 * 1000,
 
   // Maximum concurrent agents (review + execute combined)
-  MAX_CONCURRENT_AGENTS: 3,
+  get MAX_CONCURRENT_AGENTS(): number {
+    return isPro() ? PRO_MAX_CONCURRENT : FREE_MAX_CONCURRENT;
+  },
+
+  // Free tier project limit
+  FREE_MAX_PROJECTS,
 } as const;
 
 // JSON schema for review agent structured output

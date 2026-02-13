@@ -3,7 +3,7 @@ import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import { CONFIG, type LockEntry, type TicketDetails, type ReviewOutput } from './config.js';
+import { CONFIG, isPro, type LockEntry, type TicketDetails, type ReviewOutput } from './config.js';
 import {
   fetchTicketsByStatus,
   fetchTicketDetails,
@@ -516,11 +516,23 @@ async function main(): Promise<void> {
 
   setupShutdown();
 
+  const pro = isPro();
+  const projectNames = Object.keys(CONFIG.PROJECTS);
+
+  // Free tier: enforce 1-project limit
+  if (!pro && projectNames.length > CONFIG.FREE_MAX_PROJECTS) {
+    console.error(
+      `Free tier supports ${CONFIG.FREE_MAX_PROJECTS} project. You have ${projectNames.length} configured.` +
+      `\nRemove extra projects from config.ts, or add a LICENSE_KEY to .env.local to unlock unlimited projects.`
+    );
+    process.exit(1);
+  }
+
   console.log('');
-  log(GREEN, 'START', 'Notion-Claude Bridge');
+  log(GREEN, 'START', `Notion-Claude Bridge ${pro ? '(Pro)' : '(Free)'}`);
   log(DIM, 'CONFIG', `Poll interval: ${CONFIG.POLL_INTERVAL_MS / 1000}s`);
-  log(DIM, 'CONFIG', `Max concurrent agents: ${CONFIG.MAX_CONCURRENT_AGENTS}`);
-  log(DIM, 'CONFIG', `Projects: ${Object.keys(CONFIG.PROJECTS).join(', ')}`);
+  log(DIM, 'CONFIG', `Max concurrent agents: ${CONFIG.MAX_CONCURRENT_AGENTS}${pro ? '' : ' (upgrade to Pro for up to 10)'}`);
+  log(DIM, 'CONFIG', `Projects: ${projectNames.join(', ')}`);
   log(DIM, 'CONFIG', `Review budget: $${CONFIG.REVIEW_BUDGET_USD} / Execute budget: $${CONFIG.EXECUTE_BUDGET_USD}`);
   if (DRY_RUN) log(YELLOW, 'CONFIG', 'DRY-RUN mode: polling only, no agents will run');
   if (ONCE) log(YELLOW, 'CONFIG', 'ONE-SHOT mode: will exit after first poll');
