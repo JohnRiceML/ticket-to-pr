@@ -82,7 +82,12 @@ The human decision point is between **Scored** and **Execute**. You always revie
 git clone <repo-url> ~/Projects/ticket-to-pr
 cd ~/Projects/ticket-to-pr
 npm install
-cp .env.local.example .env.local   # Then edit with your tokens (see Setup below)
+
+# Guided setup — configures Notion, projects, and .env.local
+npx tsx index.ts init
+
+# Verify everything is working
+npx tsx index.ts doctor
 
 # Test connection
 npx tsx index.ts --dry-run --once
@@ -428,10 +433,12 @@ EOF
 
 Replace `YOUR_USERNAME` and update the PATH to include your Node.js bin directory (`which node` to find it). If using nvm, the path looks like `/Users/you/.nvm/versions/node/v22.x.x/bin`.
 
-## CLI Flags
+## CLI Commands & Flags
 
-| Flag | Behavior |
-|------|----------|
+| Command / Flag | Behavior |
+|----------------|----------|
+| `init` | Guided setup — configures Notion tokens, projects, `.env.local`, and `config.ts` |
+| `doctor` | Diagnostic check — verifies environment, Notion connectivity, tools, and projects |
 | (none) | Continuous polling every 30s |
 | `--once` | Poll once, wait for agents to finish, exit |
 | `--dry-run` | Poll and log what would happen, don't run agents |
@@ -491,6 +498,7 @@ All settings in `config.ts`:
 ```
 ticket-to-pr/
   index.ts              # Poll loop, agent runner, git workflow, graceful shutdown
+  cli.ts                # init (guided setup) and doctor (diagnostic check) commands
   config.ts             # Project mappings, budgets, column names, TypeScript types
   lib/
     notion.ts           # Notion API helpers (fetch, write, move status)

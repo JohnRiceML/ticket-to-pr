@@ -6,7 +6,9 @@
   "scripts": {
     "start": "tsx index.ts",
     "dry-run": "tsx index.ts --dry-run",
-    "once": "tsx index.ts --once"
+    "once": "tsx index.ts --once",
+    "init": "tsx index.ts init",
+    "doctor": "tsx index.ts doctor"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.0",

@@ -105,7 +105,12 @@ The rhythm is **you, AI, you, AI, AI, you** — three human touchpoints, three A
 git clone https://github.com/JohnRiceML/ticket-to-pr.git
 cd ticket-to-pr
 npm install
-cp .env.local.example .env.local   # Then edit with your tokens (see Setup below)
+
+# Guided setup — configures Notion, projects, and .env.local
+npx tsx index.ts init
+
+# Verify everything is working
+npx tsx index.ts doctor
 
 # Test connection
 npx tsx index.ts --dry-run --once
@@ -224,14 +229,88 @@ npx tsx index.ts --dry-run --once
 
 ## Usage
 
-### CLI Flags
+### CLI Commands & Flags
 
-| Flag | Behavior |
-|------|----------|
+| Command / Flag | Behavior |
+|----------------|----------|
+| `init` | Guided setup — configures Notion tokens, projects, `.env.local`, and `config.ts` |
+| `doctor` | Diagnostic check — verifies environment, Notion connectivity, tools, and projects |
 | *(none)* | Continuous polling every 30s |
 | `--once` | Poll once, wait for agents to finish, exit |
 | `--dry-run` | Poll and log what would happen, don't run agents |
 | `--dry-run --once` | Single poll, log findings, exit immediately |
+
+### `init` — Guided Setup
+
+Run `npx tsx index.ts init` to configure TicketToPR interactively. It walks you through four steps:
+
+```
+TicketToPR Setup
+
+Step 1: Notion
+  Notion token: ntn_...          → tests connectivity immediately
+  ✓ Token valid
+  Database ID: abc123...         → tests database access
+  ✓ Database accessible
+
+Step 2: Tools
+  ✓ gh  gh version 2.86.0
+  ✓ gh authenticated
+  ✓ claude  2.1.34 (Claude Code)
+
+Step 3: Projects
+  Project name: MyApp
+  Directory: /Users/you/Projects/MyApp
+  ✓ Git repo  git@github.com:you/MyApp.git
+  Build command (optional): npm run build
+
+  Add another project? (N):
+
+Step 4: Save
+  ✓ Wrote .env.local
+  ✓ Updated config.ts
+
+Ready!
+  Test:  npx ticket-to-pr doctor
+  Docs:  https://github.com/JohnRiceML/ticket-to-pr
+```
+
+- Masks existing secrets when showing defaults — safe to re-run
+- Updates `.env.local` and `config.ts` in place (won't duplicate entries)
+- Validates directories, git repos, and Notion connectivity as you go
+
+### `doctor` — Diagnostic Check
+
+Run `npx tsx index.ts doctor` to verify your setup. It checks everything non-interactively:
+
+```
+TicketToPR Doctor
+
+Environment:
+  ✓ .env.local exists
+  ✓ NOTION_TOKEN set        ntn_...M7qr
+  ✓ NOTION_DATABASE_ID set  306d...ac35
+  ○ LICENSE_KEY              Free tier
+
+Notion:
+  ✓ Token valid              connected to workspace
+  ✓ Database accessible
+
+Tools:
+  ✓ gh installed             gh version 2.86.0
+  ✓ gh authenticated
+  ✓ claude installed         2.1.34 (Claude Code)
+
+Projects:
+  ✓ MyApp                    /Users/you/Projects/MyApp
+
+Summary: 10 passed, 1 warnings, 0 failed
+Docs: https://github.com/JohnRiceML/ticket-to-pr
+```
+
+- `✓` = passed, `✗` = failed, `○` = warning (non-blocking)
+- Exits with code 1 if any hard failures, 0 otherwise
+- Run after `init` to confirm everything works, or anytime to diagnose issues
 
 ### Your First Ticket
 
@@ -407,6 +486,7 @@ All settings in `config.ts`:
 ```
 ticket-to-pr/
   index.ts              # Poll loop, agent runner, git workflow, graceful shutdown
+  cli.ts                # init (guided setup) and doctor (diagnostic check) commands
   config.ts             # Project mappings, budgets, column names, license gating
   lib/
     notion.ts           # Notion API helpers (fetch, write, move status)

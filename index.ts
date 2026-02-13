@@ -21,6 +21,14 @@ loadEnv(join(__dirname, '.env.local'));
 // Allow running inside a Claude Code session (e.g. during development)
 delete process.env.CLAUDECODE;
 
+// -- Subcommand routing --
+const subcommand = process.argv[2];
+if (subcommand === 'init' || subcommand === 'doctor') {
+  const { runInit, runDoctor } = await import('./cli.js');
+  await (subcommand === 'init' ? runInit() : runDoctor());
+  process.exit(0);
+}
+
 // -- CLI flags --
 const args = process.argv.slice(2);
 const DRY_RUN = args.includes('--dry-run');
