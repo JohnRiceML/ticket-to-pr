@@ -198,19 +198,25 @@ export async function writeReviewResults(pageId: string, results: ReviewOutput):
  */
 export async function writeExecutionResults(
   pageId: string,
-  results: { branch: string; cost: number },
+  results: { branch: string; cost: number; prUrl?: string },
 ): Promise<void> {
-  await notion().pages.update({
-    page_id: pageId,
-    properties: {
-      Branch: {
-        rich_text: [{ text: { content: results.branch } }],
-      },
-      Cost: {
-        rich_text: [{ text: { content: `$${(Math.round(results.cost * 100) / 100).toFixed(2)}` } }],
-      },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const properties: Record<string, any> = {
+    Branch: {
+      rich_text: [{ text: { content: results.branch } }],
     },
-  });
+    Cost: {
+      rich_text: [{ text: { content: `$${(Math.round(results.cost * 100) / 100).toFixed(2)}` } }],
+    },
+  };
+
+  if (results.prUrl) {
+    properties.PR = {
+      url: results.prUrl,
+    };
+  }
+
+  await notion().pages.update({ page_id: pageId, properties });
 }
 
 /**

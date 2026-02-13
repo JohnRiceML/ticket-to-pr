@@ -243,11 +243,43 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
     log(CYAN, 'PUSH', `Pushing ${branchName}`);
     execSync(`git push -u origin ${branchName}`, { cwd: projectDir, stdio: 'pipe' });
 
+    // Create PR
+    let prUrl = '';
+    try {
+      log(CYAN, 'PR', 'Creating pull request...');
+      const prBody = [
+        '## Summary',
+        '',
+        ticket.spec ?? ticket.description,
+        '',
+        '## Impact',
+        '',
+        ticket.impact ?? '_No impact analysis_',
+        '',
+        `## Notion Ticket`,
+        '',
+        `[View in Notion](https://www.notion.so/${ticket.id.replace(/-/g, '')})`,
+        '',
+        '---',
+        `Cost: $${cost.toFixed(2)} | Review: Ease ${extractNumber(ticket, 'ease')}/10, Confidence ${extractNumber(ticket, 'confidence')}/10`,
+      ].join('\n');
+
+      const prResult = execSync(
+        `gh pr create --title ${shellEscape(ticket.title)} --body ${shellEscape(prBody)} --base main --head ${branchName}`,
+        { cwd: projectDir, stdio: 'pipe', timeout: 30_000 },
+      );
+      prUrl = prResult.toString().trim();
+      log(GREEN, 'PR', `Created: ${prUrl}`);
+    } catch (e) {
+      // PR creation is best-effort — don't fail the ticket over it
+      log(YELLOW, 'PR', `Failed to create PR: ${e instanceof Error ? e.message : e}`);
+    }
+
     // Update Notion
-    await writeExecutionResults(ticket.id, { branch: branchName, cost });
+    await writeExecutionResults(ticket.id, { branch: branchName, cost, prUrl });
     await moveTicketStatus(ticket.id, CONFIG.COLUMNS.DONE);
 
-    log(GREEN, 'EXECUTE', `Done: branch=${branchName} cost=$${cost.toFixed(2)}`);
+    log(GREEN, 'EXECUTE', `Done: branch=${branchName} cost=$${cost.toFixed(2)}${prUrl ? ` pr=${prUrl}` : ''}`);
   } catch (error) {
     // On failure, clean up: checkout main, optionally delete branch
     try {
@@ -486,6 +518,24 @@ function extractJsonFromOutput(text: string): Record<string, unknown> | null {
   }
 
   return null;
+}
+
+function shellEscape(str: string): string {
+  return `'${str.replace(/'/g, "'\\''")}'`;
+}
+
+function extractNumber(ticket: TicketDetails, field: string): string {
+  // Pull ease/confidence from the impact text if available
+  const text = ticket.impact ?? '';
+  if (field === 'ease') {
+    const match = text.match(/Ease[:\s]*(\d+)/i);
+    return match ? match[1] : '?';
+  }
+  if (field === 'confidence') {
+    const match = text.match(/Confidence[:\s]*(\d+)/i);
+    return match ? match[1] : '?';
+  }
+  return '?';
 }
 
 function loadEnv(filepath: string): void {
