@@ -211,7 +211,7 @@ export async function writeExecutionResults(
   };
 
   if (results.prUrl) {
-    properties.PR = {
+    properties['PR URL'] = {
       url: results.prUrl,
     };
   }

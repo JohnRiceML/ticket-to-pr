@@ -94,7 +94,7 @@ Create a new **Board view** database in Notion. Then add these properties:
 | `Impact` | Text | Files affected + risks, written by review agent |
 | `Branch` | Text | Git branch name, written by execute agent |
 | `Cost` | Text | USD spent on the Claude run |
-| `PR` | URL | GitHub pull request link, written by execute agent |
+| `PR URL` | URL | GitHub pull request link, written by execute agent |
 
 **Add these 7 status columns** (rename defaults + add new ones):
 
