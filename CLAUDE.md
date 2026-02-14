@@ -304,11 +304,15 @@ https://www.notion.so/yourteam/abc123def456789...?v=...
 
 ### 3. Configure Environment
 
-Create `.env.local` in the project root:
+Create `.env.local` in the project root (this file is git-ignored):
 
 ```bash
 NOTION_TOKEN=ntn_your_token_here
 NOTION_DATABASE_ID=your_32_char_hex_database_id
+
+# Optional: override default models (sonnet for review, opus for execute)
+# REVIEW_MODEL=claude-sonnet-4-5-20250929
+# EXECUTE_MODEL=claude-opus-4-6
 ```
 
 ### 4. Authenticate GitHub CLI
@@ -514,7 +518,8 @@ ticket-to-pr/
   index.ts              # Poll loop, agent runner, worktree git workflow, graceful shutdown
   cli.ts                # init (guided setup) and doctor (diagnostic check) commands
   config.ts             # Budgets, column names, license check, TypeScript types
-  projects.json         # Project directories and build commands (replaces config.ts mappings)
+  projects.json         # Your project directories and build commands (git-ignored, copy from example)
+  projects.example.json # Template for projects.json
   lib/
     utils.ts            # Pure utilities (shellEscape, clamp, loadEnv, worktree helpers, etc.)
     projects.ts         # JSON-backed project config loader with caching
@@ -526,7 +531,7 @@ ticket-to-pr/
   prompts/
     review.md           # Review agent system prompt with scoring rubric
     execute.md          # Execute agent system prompt with safety rules
-  .env.local            # NOTION_TOKEN + NOTION_DATABASE_ID (git-ignored)
+  .env.local            # NOTION_TOKEN, NOTION_DATABASE_ID, model overrides (git-ignored)
   package.json          # Dependencies: @anthropic-ai/claude-agent-sdk, @notionhq/client, vitest
   tsconfig.json         # ESNext + NodeNext
   icon.svg              # App icon
