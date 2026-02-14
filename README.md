@@ -6,7 +6,7 @@
 
 AI-powered development automation that turns your Notion backlog into shipped code.
 
-[Get Started](#quick-start) | [How It Works](#how-it-works) | [Pricing](#pricing) | [Documentation](#setup)
+[Get Started](#quick-start) | [How It Works](#how-it-works) | [Pricing](#pricing) | [Docs](https://www.tickettopr.com)
 
 </div>
 
@@ -71,7 +71,7 @@ Execute          Claude creates branch, implements code, commits changes.
 In Progress      Set automatically when the execute agent starts working.
    |
    v
-Done             Branch pushed. PR created on GitHub.
+PR Ready         Branch pushed. PR created on GitHub.
                  Branch name, cost, and PR link written to ticket.
 
 Failed           Agent errored. Error details on ticket.
@@ -156,7 +156,7 @@ Create a new **Board view** database in Notion with these properties:
 | `Name` | Title | Ticket name (Notion default) |
 | `Status` | Status | Board columns (kanban lanes) |
 | `Description` | Text | What needs to be done |
-| `Project` | Text or Select | Maps to a local directory (must match `config.ts`) |
+| `Project` | Text or Select | Maps to a local directory (must match `projects.json`) |
 | `Ease` | Number | 1-10 feasibility score (written by AI) |
 | `Confidence` | Number | 1-10 clarity score (written by AI) |
 | `Spec` | Text | Implementation plan (written by AI) |
@@ -168,7 +168,7 @@ Create a new **Board view** database in Notion with these properties:
 Add these **7 status columns**:
 
 ```
-Backlog | Review | Scored | Execute | In Progress | Done | Failed
+Backlog | Review | Scored | Execute | In Progress | PR Ready | Failed
 ```
 
 Connect the integration: **"..." menu** on the database page -> **Connections** -> search **TicketToPR** -> add it.
@@ -181,51 +181,27 @@ https://www.notion.so/yourteam/abc123def456789...?v=...
                                 this is the database ID
 ```
 
-### 3. Configure Environment
+### 3. Run `init`
+
+The guided setup configures everything interactively — Notion credentials, tools, models, and projects:
 
 ```bash
-cp .env.local.example .env.local
+npx tsx index.ts init
 ```
 
-Edit `.env.local`:
+Init validates as you go: invalid Notion tokens and database IDs are rejected immediately (you'll be re-prompted), and it warns about missing tools. If you re-run `init` later, it detects existing config and asks whether to update or start fresh.
+
+### 4. Verify
 
 ```bash
-NOTION_TOKEN=ntn_your_token_here
-NOTION_DATABASE_ID=your_32_char_hex_database_id
-```
+npx tsx index.ts doctor
+# Should show all checks passing, including database schema validation
 
-### 4. Authenticate GitHub CLI
-
-```bash
-gh auth login
-# Choose: GitHub.com -> HTTPS -> Authenticate via browser
-
-gh auth status
-# Should show: Logged in to github.com as yourname
-```
-
-### 5. Register Your Projects
-
-Edit `config.ts`:
-
-```typescript
-PROJECTS: {
-  'MyApp': '/Users/yourname/Projects/MyApp',
-},
-
-BUILD_COMMANDS: {
-  'MyApp': 'npm run build',
-},
-```
-
-The `Project` field on each Notion ticket must match a key in `PROJECTS` exactly (case-sensitive). Each project directory must be a git repo with an `origin` remote.
-
-### 6. Verify
-
-```bash
 npx tsx index.ts --dry-run --once
 # Should connect to Notion and report "No tickets to process"
 ```
+
+`doctor` now validates your Notion database schema — it checks that all 10 required properties (Name, Status, Project, Ease, Confidence, Spec, Impact, Branch, Cost, PR URL) exist with the correct types, and warns if Project select options don't match `projects.json`.
 
 ## Usage
 
@@ -233,8 +209,8 @@ npx tsx index.ts --dry-run --once
 
 | Command / Flag | Behavior |
 |----------------|----------|
-| `init` | Guided setup — configures Notion tokens, projects, `.env.local`, and `config.ts` |
-| `doctor` | Diagnostic check — verifies environment, Notion connectivity, tools, and projects |
+| `init` | Guided setup — validates Notion credentials live, configures projects, writes `.env.local` and `projects.json`. Detects existing config on re-run. |
+| `doctor` | Diagnostic check — verifies environment, Notion connectivity, database schema, tools, and projects |
 | *(none)* | Continuous polling every 30s |
 | `--once` | Poll once, wait for agents to finish, exit |
 | `--dry-run` | Poll and log what would happen, don't run agents |
@@ -242,23 +218,31 @@ npx tsx index.ts --dry-run --once
 
 ### `init` — Guided Setup
 
-Run `npx tsx index.ts init` to configure TicketToPR interactively. It walks you through four steps:
+Run `npx tsx index.ts init` to configure TicketToPR interactively:
 
 ```
 TicketToPR Setup
 
+  Existing configuration detected
+  Update existing config or start fresh? (update):
+  Pre-filling from existing config
+
 Step 1: Notion
-  Notion token: ntn_...          → tests connectivity immediately
-  ✓ Token valid
-  Database ID: abc123...         → tests database access
-  ✓ Database accessible
+  Notion token (ntn_...M7qr):     → validates immediately
+  ✓ Token valid  My Workspace
+  Database ID (306d...ac35):       → validates immediately
+  ✓ Database accessible  Dev Board
 
 Step 2: Tools
+  ✓ claude  2.1.34 (Claude Code)
   ✓ gh  gh version 2.86.0
   ✓ gh authenticated
-  ✓ claude  2.1.34 (Claude Code)
 
-Step 3: Projects
+Step 3: Models
+  Review model (sonnet/opus/haiku) (sonnet):
+  Execute model (sonnet/opus/haiku) (opus):
+
+Step 4: Projects
   Project name: MyApp
   Directory: /Users/you/Projects/MyApp
   ✓ Git repo  git@github.com:you/MyApp.git
@@ -266,18 +250,19 @@ Step 3: Projects
 
   Add another project? (N):
 
-Step 4: Save
+Step 5: Save
   ✓ Wrote .env.local
-  ✓ Updated config.ts
+  ✓ Updated projects.json
 
 Ready!
-  Test:  npx ticket-to-pr doctor
-  Docs:  https://github.com/JohnRiceML/ticket-to-pr
+  Test:  npx tsx index.ts doctor
+  Docs:  https://www.tickettopr.com
 ```
 
-- Masks existing secrets when showing defaults — safe to re-run
-- Updates `.env.local` and `config.ts` in place (won't duplicate entries)
-- Validates directories, git repos, and Notion connectivity as you go
+- **Blocks on bad config** — invalid Notion tokens and database IDs are rejected and re-prompted (won't save broken credentials)
+- **Re-run safe** — detects existing `.env.local` and `projects.json`, asks "update" or "start fresh"
+- **Free tier guard** — warns if you configure multiple projects without a Pro license
+- Masks existing secrets when showing defaults
 
 ### `doctor` — Diagnostic Check
 
@@ -288,41 +273,51 @@ TicketToPR Doctor
 
 Environment:
   ✓ .env.local exists
-  ✓ NOTION_TOKEN set        ntn_...M7qr
-  ✓ NOTION_DATABASE_ID set  306d...ac35
-  ○ LICENSE_KEY              Free tier
+  ✓ NOTION_TOKEN set         ntn_...M7qr
+  ✓ NOTION_DATABASE_ID set   306d...ac35
+  ○ LICENSE_KEY               Free tier
+
+Models:
+  ✓ Review model              claude-sonnet-4-5-20250929
+  ✓ Execute model             claude-opus-4-6
 
 Notion:
-  ✓ Token valid              connected to workspace
+  ✓ Token valid               connected to workspace
   ✓ Database accessible
 
+Database Schema:
+  ✓ All 10 required properties found
+  ✓ Project options match projects.json
+
 Tools:
-  ✓ gh installed             gh version 2.86.0
+  ✓ gh installed              gh version 2.86.0
   ✓ gh authenticated
-  ✓ claude installed         2.1.34 (Claude Code)
+  ✓ claude installed          2.1.34 (Claude Code)
 
 Projects:
-  ✓ MyApp                    /Users/you/Projects/MyApp
+  ✓ MyApp                     /Users/you/Projects/MyApp
 
-Summary: 10 passed, 1 warnings, 0 failed
-Docs: https://github.com/JohnRiceML/ticket-to-pr
+Summary: 14 passed, 1 warnings, 0 failed
+Docs: https://www.tickettopr.com
 ```
 
 - `✓` = passed, `✗` = failed, `○` = warning (non-blocking)
+- **Database schema check** — verifies all 10 required Notion properties exist with correct types (Name, Status, Project, Ease, Confidence, Spec, Impact, Branch, Cost, PR URL)
+- **Project mismatch detection** — if Project is a Select field, warns when Notion options and `projects.json` keys don't match
+- `gh` missing is a warning (PRs won't auto-create but everything else works), `claude` missing is a hard failure
 - Exits with code 1 if any hard failures, 0 otherwise
-- Run after `init` to confirm everything works, or anytime to diagnose issues
 
 ### Your First Ticket
 
 1. Click **"+ New"** on your Notion board
 2. **Name**: "Add a hello world test endpoint"
-3. **Project**: Your project name from `config.ts`
+3. **Project**: Your project name from `projects.json`
 4. **Description**: `Create a simple GET endpoint at /api/test/hello that returns { message: "hello world" }`
 5. Drag to **Review** column
 6. Run `npx tsx index.ts --once` and watch it score the ticket
 7. Check Notion — ticket should be in **Scored** with Ease, Confidence, Spec, Impact filled in
 8. Drag to **Execute**, run `npx tsx index.ts --once` again
-9. Check Notion — ticket should be in **Done** with Branch, Cost, and PR link
+9. Check Notion — ticket should be in **PR Ready** with Branch, Cost, and PR link
 
 Typical cost for this test: **~$0.49** ($0.22 review + $0.27 execute).
 
@@ -388,7 +383,7 @@ The review agent explores your codebase without modifying anything:
 - **Tools**: Read, Glob, Grep, Task
 - **Context**: Reads your project's `CLAUDE.md` for architecture rules
 - **Output**: Ease score, confidence score, implementation spec, impact report, affected files, risks
-- **Budget**: $2.00 max, 15 turns max
+- **Budget**: $2.00 max, 25 turns max
 - **Typical cost**: $0.15 - $0.50
 
 ### Scoring Rubric
@@ -419,13 +414,13 @@ The execute agent implements the code based on the spec:
 
 ### Git Workflow
 
-1. TicketToPR creates branch `notion/{8-char-id}/{ticket-slug}` from `main`
+1. TicketToPR creates branch `notion/{8-char-id}/{ticket-slug}` from the default branch (auto-detected — `main`, `master`, etc.)
 2. Claude implements changes and makes atomic commits
 3. TicketToPR runs your build command (if configured)
 4. Build passes: pushes branch to origin
-5. Creates a GitHub PR via `gh pr create` (includes spec, impact, Notion link, cost)
+5. Creates a GitHub PR via `gh pr create` targeting the default branch (includes spec, impact, Notion link, cost)
 6. PR URL written back to the Notion ticket
-7. Ticket moves to **Done**
+7. Ticket moves to **PR Ready**
 8. Build fails: branch kept locally, ticket moves to **Failed**
 
 ## Costs
@@ -464,7 +459,7 @@ For teams and power users who need scale:
 - Priority support
 - All future updates included
 
-No subscriptions. Pay once, own it forever.
+No subscriptions. Pay once, own it forever. **[Upgrade at www.tickettopr.com](https://www.tickettopr.com)**
 
 ## Configuration Reference
 
@@ -475,57 +470,71 @@ All settings in `config.ts`:
 | `POLL_INTERVAL_MS` | 30000 | How often to check Notion (ms) |
 | `REVIEW_BUDGET_USD` | 2.00 | Max USD per review agent run |
 | `EXECUTE_BUDGET_USD` | 15.00 | Max USD per execute agent run |
-| `REVIEW_MAX_TURNS` | 15 | Max conversation turns for review |
+| `REVIEW_MAX_TURNS` | 25 | Max conversation turns for review |
 | `EXECUTE_MAX_TURNS` | 50 | Max conversation turns for execute |
 | `STALE_LOCK_MS` | 1800000 | Force-release hung agent locks (30 min) |
-| `PROJECTS` | `{}` | Notion project name -> local directory path |
-| `BUILD_COMMANDS` | `{}` | Project name -> build validation command |
+
+Project configuration in `projects.json`:
+
+| Field | Purpose |
+|-------|---------|
+| `projects.<name>.directory` | Absolute path to the project's local git repo |
+| `projects.<name>.buildCommand` | Optional build validation command (e.g. `npm run build`) |
 
 ## Project Structure
 
 ```
 ticket-to-pr/
-  index.ts              # Poll loop, agent runner, git workflow, graceful shutdown
-  cli.ts                # init (guided setup) and doctor (diagnostic check) commands
-  config.ts             # Project mappings, budgets, column names, license gating
+  index.ts              # Poll loop, agent runner, worktree git workflow, graceful shutdown
+  cli.ts                # init (guided setup with validation) and doctor (diagnostic + schema check)
+  config.ts             # Budgets, column names, license check, TypeScript types
+  projects.json         # Your project directories and build commands (git-ignored, copy from example)
+  projects.example.json # Template for projects.json
   lib/
+    utils.ts            # Pure utilities (shellEscape, loadEnv, getDefaultBranch, worktree helpers)
+    projects.ts         # JSON-backed project config loader with caching
     notion.ts           # Notion API helpers (fetch, write, move status)
+    __tests__/          # Unit tests (vitest)
   prompts/
     review.md           # Review agent system prompt with scoring rubric
     execute.md          # Execute agent system prompt with safety rules
-  .env.local            # NOTION_TOKEN + NOTION_DATABASE_ID (git-ignored)
-  package.json          # Dependencies: @anthropic-ai/claude-agent-sdk, @notionhq/client
+  .env.local            # NOTION_TOKEN, NOTION_DATABASE_ID, model overrides (git-ignored)
+  package.json          # Dependencies: @anthropic-ai/claude-agent-sdk, @notionhq/client, vitest
   tsconfig.json         # ESNext + NodeNext
 ```
 
 ## Adding a New Project
 
-```typescript
-// config.ts
-PROJECTS: {
-  'MyProject': '/absolute/path/to/project',
-},
-BUILD_COMMANDS: {
-  'MyProject': 'npm run build',  // optional
-},
+Add to `projects.json` (or re-run `npx tsx index.ts init`):
+
+```json
+{
+  "projects": {
+    "MyProject": {
+      "directory": "/absolute/path/to/project",
+      "buildCommand": "npm run build"
+    }
+  }
+}
 ```
 
-1. The directory must be a git repo with an `origin` remote
-2. If the project has a `CLAUDE.md`, both agents will read it for context
-3. Create Notion tickets with `Project` set to the exact key name
-4. No other code changes needed
+1. `buildCommand` is optional — omit it if you don't need build validation
+2. The directory must be a git repo with an `origin` remote
+3. If the project has a `CLAUDE.md`, both agents will read it for context
+4. Create Notion tickets with `Project` set to the exact key name (case-sensitive)
+5. Run `npx tsx index.ts doctor` to verify — it will check the schema and project match
 
 ## Error Handling
 
 | Failure | What Happens |
 |---------|-------------|
 | Notion API down | Logs error, skips poll cycle, retries next interval |
-| Unknown project | Ticket -> Failed with "Unknown project" message |
-| Review agent fails | Ticket -> Failed, error written to Impact field |
-| Execute agent fails | Checks out main, ticket -> Failed |
-| Build validation fails | Ticket -> Failed, branch kept locally for inspection |
+| Unknown project | Ticket -> Failed with "Unknown project" message listing available projects and case-sensitivity hint |
+| Review agent fails | Ticket -> Failed, error written to Impact field with actionable detail |
+| Execute agent fails | Worktree cleaned up, ticket -> Failed |
+| Build validation fails | Ticket -> Failed with command, directory, and build output (up to 500 chars) |
 | Push fails | Ticket -> Failed, branch remains local |
-| PR creation fails | Ticket still moves to Done (best-effort) |
+| PR creation fails | Ticket still moves to PR Ready (best-effort) |
 | Duplicate poll trigger | Skipped via in-memory lock per ticket ID |
 | Agent hangs > 30 min | Lock force-released, ticket -> Failed |
 
@@ -561,8 +570,9 @@ BUILD_COMMANDS: {
 <details>
 <summary><strong>"Unknown project" error</strong></summary>
 
-- The `Project` field on the ticket doesn't match any key in `config.ts`
+- The `Project` field on the ticket doesn't match any key in `projects.json`
 - Match is case-sensitive: `"MyApp"` != `"myapp"`
+- The error message now lists available projects — check the terminal output
 
 </details>
 
@@ -571,7 +581,8 @@ BUILD_COMMANDS: {
 
 - Check the branch locally: `git log notion/... --oneline`
 - Run the build manually to see the actual error
-- Ensure `main` branch builds successfully before running tickets
+- Ensure the default branch builds successfully before running tickets
+- The error now shows the command, directory, and build output
 
 </details>
 
@@ -582,7 +593,7 @@ BUILD_COMMANDS: {
 - Authenticate: `gh auth login`
 - Verify: `gh auth status`
 - The project must have a GitHub `origin` remote
-- PR creation is best-effort — the ticket still moves to Done without it
+- PR creation is best-effort — the ticket still moves to PR Ready without it
 
 </details>
 
@@ -629,7 +640,7 @@ MIT
 
 <div align="center">
 
-**Built by [John Rice](https://github.com/JohnRiceML)**
+**Built by [John Rice](https://github.com/JohnRiceML)** | [www.tickettopr.com](https://www.tickettopr.com)
 
 [Get Started](#quick-start) | [Report a Bug](https://github.com/JohnRiceML/ticket-to-pr/issues) | [Request a Feature](https://github.com/JohnRiceML/ticket-to-pr/issues)
 

@@ -304,7 +304,7 @@ export async function runDoctor(): Promise<void> {
 
   // Summary
   console.log(`\n${BOLD}Summary:${RESET} ${GREEN}${passed} passed${RESET}, ${YELLOW}${warnings} warnings${RESET}, ${RED}${failed} failed${RESET}`);
-  console.log(`${DIM}Docs: https://github.com/JohnRiceML/ticket-to-pr${RESET}\n`);
+  console.log(`${DIM}Docs: https://www.tickettopr.com${RESET}\n`);
 
   process.exitCode = failed > 0 ? 1 : 0;
 }
@@ -557,7 +557,7 @@ export async function runInit(): Promise<void> {
 
     console.log(`\n${BOLD}Ready!${RESET}`);
     console.log(`  Test:  ${DIM}npx tsx index.ts doctor${RESET}`);
-    console.log(`  Docs:  ${DIM}https://github.com/JohnRiceML/ticket-to-pr${RESET}\n`);
+    console.log(`  Docs:  ${DIM}https://www.tickettopr.com${RESET}\n`);
   } finally {
     rl.close();
   }

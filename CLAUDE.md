@@ -263,7 +263,7 @@ If all criteria pass, TicketToPR is working correctly and ready for real tickets
 
 1. Go to https://www.notion.so/profile/integrations
 2. Click **"New integration"**
-3. Name: `Claude Bridge`
+3. Name: `TicketToPR`
 4. Associated workspace: select yours
 5. Capabilities: enable **Read content**, **Update content**, **Insert content**
 6. Click Submit
@@ -293,7 +293,7 @@ Create a new **Board view** database in Notion. Then add these properties:
 Backlog | Review | Scored | Execute | In Progress | PR Ready | Failed
 ```
 
-**Connect the integration to the database**: Click "..." menu on the database page -> "Connections" -> search "Claude Bridge" -> add it.
+**Connect the integration to the database**: Click "..." menu on the database page -> "Connections" -> search "TicketToPR" -> add it.
 
 **Copy the database ID** from the URL:
 ```
@@ -443,8 +443,8 @@ Replace `YOUR_USERNAME` and update the PATH to include your Node.js bin director
 
 | Command / Flag | Behavior |
 |----------------|----------|
-| `init` | Guided setup — configures Notion tokens, projects, `.env.local`, and `projects.json` |
-| `doctor` | Diagnostic check — verifies environment, Notion connectivity, tools, and projects |
+| `init` | Guided setup — validates Notion credentials live, configures projects, writes `.env.local` and `projects.json`. Detects existing config on re-run. |
+| `doctor` | Diagnostic check — verifies environment, Notion connectivity, database schema (10 required properties), tools, and projects |
 | (none) | Continuous polling every 30s |
 | `--once` | Poll once, wait for agents to finish, exit |
 | `--dry-run` | Poll and log what would happen, don't run agents |
@@ -516,12 +516,12 @@ Project configuration in `projects.json`:
 ```
 ticket-to-pr/
   index.ts              # Poll loop, agent runner, worktree git workflow, graceful shutdown
-  cli.ts                # init (guided setup) and doctor (diagnostic check) commands
+  cli.ts                # init (guided setup with live validation) and doctor (diagnostic + schema check)
   config.ts             # Budgets, column names, license check, TypeScript types
   projects.json         # Your project directories and build commands (git-ignored, copy from example)
   projects.example.json # Template for projects.json
   lib/
-    utils.ts            # Pure utilities (shellEscape, clamp, loadEnv, worktree helpers, etc.)
+    utils.ts            # Pure utilities (shellEscape, clamp, loadEnv, getDefaultBranch, worktree helpers)
     projects.ts         # JSON-backed project config loader with caching
     notion.ts           # Notion API helpers (fetch, write, move status)
     __tests__/
@@ -622,8 +622,6 @@ First end-to-end test (hello world endpoint): **$0.49 total** ($0.22 review + $0
 
 ## Future Enhancements
 
-- Write agent logs as Notion page comments for audit trail
-- Parallel ticket execution (configurable concurrency limit)
 - Auto-retry failed tickets with exponential backoff
 - Cost tracking dashboard aggregated per project/week
 - Linux systemd service support
