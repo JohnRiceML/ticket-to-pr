@@ -134,8 +134,8 @@ Create a new ticket in your Notion board with these exact values:
 | Field | Value |
 |-------|-------|
 | **Name** | Add a health check endpoint |
-| **Project** | `PeekABoo` (or your project name from `config.ts` — must match exactly) |
-| **Description** | Create a GET endpoint at /api/health that returns { status: "ok", timestamp: <current ISO timestamp> }. No auth required. |
+| **Project** | `PeekABoo` (or your project name from `projects.json` — must match exactly) |
+| **Description** | Create a GET endpoint at /api/health that returns `{ status: "ok", timestamp: <current ISO timestamp> }`. No auth required. |
 | **Status** | Backlog (default) |
 
 ### Step-by-Step Test Flow
@@ -211,17 +211,12 @@ Create a new ticket in your Notion board with these exact values:
    # Or merge if you want to keep the health check endpoint
    gh pr merge 123 --squash
    ```
-2. **Delete the test branch locally**:
+2. **Delete the test branch** (worktree is auto-cleaned, but the branch ref remains):
    ```bash
    cd ~/Projects/PeekABoo  # Or your project path
-   git checkout main
    git branch -D notion/abc12345/add-a-health-check-endpoint
    ```
-3. **Delete the health check endpoint file** (if you closed the PR):
-   ```bash
-   rm app/api/health/route.ts  # Adjust path based on what was created
-   ```
-4. **Delete the test ticket** in Notion (click "..." -> Delete)
+3. **Delete the test ticket** in Notion (click "..." -> Delete)
 
 ### Expected Costs
 
@@ -238,10 +233,10 @@ More complex tickets will cost more, but should stay well within the budget limi
 | Error | Cause | Quick Fix |
 |-------|-------|-----------|
 | **"API token is invalid"** | Wrong Notion token or integration not connected | Check `.env.local`, reconnect integration in Notion ("..." -> Connections) |
-| **"Unknown project: PeekABoo"** | Project field doesn't match `config.ts` | Project name is case-sensitive — must match exactly |
+| **"Unknown project: PeekABoo"** | Project field doesn't match `projects.json` | Project name is case-sensitive — must match exactly |
 | **"Claude Code process exited with code 1"** | Claude CLI not authenticated | Run `claude "test"` manually to verify authentication |
 | **PR URL empty after Done** | GitHub CLI not authenticated | Run `gh auth login` and follow browser authentication |
-| **"Build validation failed"** | Build command not configured or project has existing build errors | Check `BUILD_COMMANDS` in `config.ts`, ensure `main` branch builds successfully |
+| **"Build validation failed"** | Build command not configured or project has existing build errors | Check `buildCommand` in `projects.json`, ensure `main` branch builds successfully |
 | **Ticket stuck in "In Progress"** | Agent crashed mid-execution | Check logs for errors, drag ticket back to Execute to retry |
 | **No output in terminal** | Wrong database ID or token | Verify `NOTION_DATABASE_ID` in `.env.local` matches your board URL |
 
@@ -283,7 +278,7 @@ Create a new **Board view** database in Notion. Then add these properties:
 | `Name` | Title | Ticket name (Notion default - do not rename) |
 | `Status` | Status | Board columns - the kanban lanes |
 | `Description` | Text | What needs to be done |
-| `Project` | Text or Select | Maps to a local directory (must match `config.ts` exactly) |
+| `Project` | Text or Select | Maps to a local directory (must match `projects.json` exactly) |
 | `Ease` | Number | 1-10 feasibility score, written by review agent |
 | `Confidence` | Number | 1-10 clarity score, written by review agent |
 | `Spec` | Text | Implementation plan, written by review agent |
@@ -334,21 +329,24 @@ gh auth status
 
 ### 5. Register Your Projects
 
-Edit `config.ts` — add your project to `PROJECTS` and optionally `BUILD_COMMANDS`:
+Edit `projects.json` — add your projects with their directory and optional build command:
 
-```typescript
-PROJECTS: {
-  'PeekABoo': '/Users/yourname/Projects/PeekABoo',
-  'MyOtherApp': '/Users/yourname/Projects/MyOtherApp',
-},
-
-BUILD_COMMANDS: {
-  'PeekABoo': 'npm run build',
-  'MyOtherApp': 'cargo build',
-},
+```json
+{
+  "projects": {
+    "PeekABoo": {
+      "directory": "/Users/yourname/Projects/PeekABoo",
+      "buildCommand": "npm run build"
+    },
+    "MyOtherApp": {
+      "directory": "/Users/yourname/Projects/MyOtherApp",
+      "buildCommand": "cargo build"
+    }
+  }
+}
 ```
 
-The `Project` field on each Notion ticket must match a key in `PROJECTS` exactly (case-sensitive). Each project directory must be a git repo with an `origin` remote.
+The `Project` field on each Notion ticket must match a key in `projects.json` exactly (case-sensitive). Each project directory must be a git repo with an `origin` remote.
 
 ### 6. Verify
 
@@ -437,7 +435,7 @@ Replace `YOUR_USERNAME` and update the PATH to include your Node.js bin director
 
 | Command / Flag | Behavior |
 |----------------|----------|
-| `init` | Guided setup — configures Notion tokens, projects, `.env.local`, and `config.ts` |
+| `init` | Guided setup — configures Notion tokens, projects, `.env.local`, and `projects.json` |
 | `doctor` | Diagnostic check — verifies environment, Notion connectivity, tools, and projects |
 | (none) | Continuous polling every 30s |
 | `--once` | Poll once, wait for agents to finish, exit |
@@ -466,21 +464,23 @@ Replace `YOUR_USERNAME` and update the PATH to include your Node.js bin director
 
 ### Git Workflow
 
-1. Bridge creates branch `notion/{8-char-id}/{ticket-slug}` from main
-2. Claude implements changes, makes atomic commits
+1. Bridge creates an isolated git worktree with branch `notion/{8-char-id}/{ticket-slug}`
+2. Claude implements changes in the worktree, makes atomic commits
 3. Bridge runs build command (if configured for the project)
 4. Build passes: bridge pushes branch to origin
 5. Bridge creates a GitHub PR via `gh pr create` (includes spec, impact, Notion link, cost)
 6. PR URL written back to the ticket's `PR` property
 7. Ticket moves to Done with branch name, cost, and PR link
-8. Build fails: branch kept locally, ticket -> Failed
-9. Always checks out main when done
+8. Build fails: ticket -> Failed
+9. Worktree is always cleaned up when done (main working directory is never touched)
+
+Multiple execute agents can safely target the same project concurrently because each runs in its own worktree.
 
 **PR creation is best-effort** — if `gh` isn't authenticated or the push target has no GitHub remote, the ticket still moves to Done with the branch name. You can always create a PR manually.
 
 ## Configuration Reference
 
-All settings in `config.ts`:
+Settings in `config.ts`:
 
 | Setting | Default | Purpose |
 |---------|---------|---------|
@@ -490,23 +490,35 @@ All settings in `config.ts`:
 | `REVIEW_MAX_TURNS` | 15 | Max conversation turns for review |
 | `EXECUTE_MAX_TURNS` | 50 | Max conversation turns for execute |
 | `STALE_LOCK_MS` | 1800000 | Force-release hung agent locks (30 min) |
-| `PROJECTS` | {} | Notion project name -> local directory path |
-| `BUILD_COMMANDS` | {} | Project name -> build validation command |
+
+Project configuration in `projects.json`:
+
+| Field | Purpose |
+|-------|---------|
+| `projects.<name>.directory` | Absolute path to the project's local git repo |
+| `projects.<name>.buildCommand` | Optional build validation command (e.g. `npm run build`) |
 
 ## File Structure
 
 ```
 ticket-to-pr/
-  index.ts              # Poll loop, agent runner, git workflow, graceful shutdown
+  index.ts              # Poll loop, agent runner, worktree git workflow, graceful shutdown
   cli.ts                # init (guided setup) and doctor (diagnostic check) commands
-  config.ts             # Project mappings, budgets, column names, TypeScript types
+  config.ts             # Budgets, column names, license check, TypeScript types
+  projects.json         # Project directories and build commands (replaces config.ts mappings)
   lib/
+    utils.ts            # Pure utilities (shellEscape, clamp, loadEnv, worktree helpers, etc.)
+    projects.ts         # JSON-backed project config loader with caching
     notion.ts           # Notion API helpers (fetch, write, move status)
+    __tests__/
+      utils.test.ts     # Utility function tests
+      projects.test.ts  # Project config loader tests
+      notion.test.ts    # Notion helper tests
   prompts/
     review.md           # Review agent system prompt with scoring rubric
     execute.md          # Execute agent system prompt with safety rules
   .env.local            # NOTION_TOKEN + NOTION_DATABASE_ID (git-ignored)
-  package.json          # Dependencies: @anthropic-ai/claude-agent-sdk, @notionhq/client
+  package.json          # Dependencies: @anthropic-ai/claude-agent-sdk, @notionhq/client, vitest
   tsconfig.json         # ESNext + NodeNext
   icon.svg              # App icon
   bridge.log            # Runtime logs when using launchd (git-ignored)
@@ -514,14 +526,14 @@ ticket-to-pr/
 
 ## Adding a New Project
 
-1. Add to `PROJECTS` in `config.ts`:
-   ```typescript
-   'MyProject': '/absolute/path/to/project',
+1. Add to `projects.json`:
+   ```json
+   "MyProject": {
+     "directory": "/absolute/path/to/project",
+     "buildCommand": "npm run build"
+   }
    ```
-2. Optionally add a build command:
-   ```typescript
-   'MyProject': 'npm run build',
-   ```
+2. `buildCommand` is optional — omit it if you don't need build validation
 3. Make sure the directory is a git repo with an `origin` remote
 4. If the project has a `CLAUDE.md`, both agents will read it for context
 5. Create Notion tickets with `Project` set to `"MyProject"`
@@ -535,7 +547,7 @@ No other code changes needed.
 | Notion API down | Logs error, skips poll cycle, retries next interval |
 | Unknown project | Ticket -> Failed with "Unknown project" message |
 | Review agent fails | Ticket -> Failed, error written to Impact field |
-| Execute agent fails | Checks out main, ticket -> Failed |
+| Execute agent fails | Worktree cleaned up, ticket -> Failed |
 | Build validation fails | Ticket -> Failed, branch kept locally for inspection |
 | Push fails | Ticket -> Failed, branch remains local |
 | PR creation fails | Ticket still moves to Done (best-effort), logged as warning |
@@ -560,11 +572,11 @@ No other code changes needed.
 - Drag ticket back to Execute to retry, or to Failed
 
 **"Unknown project" error**
-- The `Project` field value on the ticket doesn't match any key in `config.ts` PROJECTS
+- The `Project` field value on the ticket doesn't match any key in `projects.json`
 - Match is case-sensitive: "PeekABoo" != "peekaboo"
 
 **Build validation fails but code looks correct**
-- The build runs in the project directory with the agent's changes
+- The build runs in the worktree with the agent's changes
 - Check the branch locally: `git log notion/... --oneline`
 - Run the build manually to see the actual error
 
