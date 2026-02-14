@@ -3,7 +3,7 @@ import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import { CONFIG, isPro, type LockEntry, type TicketDetails, type ReviewOutput } from './config.js';
+import { CONFIG, REVIEW_OUTPUT_SCHEMA, isPro, type LockEntry, type TicketDetails, type ReviewOutput } from './config.js';
 import { sleep, clamp, extractJsonFromOutput, shellEscape, extractNumber, loadEnv, createWorktree, removeWorktree } from './lib/utils.js';
 import { getProjectDir, getProjectNames, getBuildCommand } from './lib/projects.js';
 import {
@@ -89,6 +89,7 @@ async function runReviewAgent(ticket: TicketDetails): Promise<void> {
   const messages = query({
     prompt,
     options: {
+      model: CONFIG.REVIEW_MODEL,
       cwd: projectDir,
       tools: ['Read', 'Glob', 'Grep', 'Task'],
       allowedTools: ['Read', 'Glob', 'Grep', 'Task'],
@@ -98,6 +99,10 @@ async function runReviewAgent(ticket: TicketDetails): Promise<void> {
       allowDangerouslySkipPermissions: true,
       settingSources: ['project'],
       systemPrompt: { type: 'preset', preset: 'claude_code' },
+      outputFormat: {
+        type: 'json_schema',
+        schema: REVIEW_OUTPUT_SCHEMA as Record<string, unknown>,
+      },
       stderr: (data: string) => {
         if (data.trim()) log(DIM, 'STDERR', data.trim());
       },
@@ -105,6 +110,7 @@ async function runReviewAgent(ticket: TicketDetails): Promise<void> {
   });
 
   let output = '';
+  let structuredOutput: unknown = undefined;
   let cost = 0;
 
   for await (const message of messages) {
@@ -125,15 +131,18 @@ async function runReviewAgent(ticket: TicketDetails): Promise<void> {
       if (message.subtype !== 'success') {
         throw new Error(`Review agent failed: ${message.subtype}`);
       }
-      // Use result text if available
+      // Prefer structured_output from json_schema outputFormat
+      if ('structured_output' in message && message.structured_output != null) {
+        structuredOutput = message.structured_output;
+      }
       if (message.result) {
         output = message.result;
       }
     }
   }
 
-  // Parse structured output from the last JSON block in the response
-  const parsed = extractJsonFromOutput(output);
+  // Prefer structured output (from outputFormat), fall back to JSON extraction from text
+  const parsed = (structuredOutput as Record<string, unknown> | undefined) ?? extractJsonFromOutput(output);
   if (!parsed) {
     throw new Error('Review agent did not produce valid JSON output');
   }
@@ -215,6 +224,7 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
     const messages = query({
       prompt,
       options: {
+        model: CONFIG.EXECUTE_MODEL,
         cwd: worktreeDir,
         allowedTools: [
           'Read', 'Glob', 'Grep', 'Edit', 'Write', 'Task',

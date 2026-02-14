@@ -446,15 +446,18 @@ Replace `YOUR_USERNAME` and update the PATH to include your Node.js bin director
 
 ### Review Agent (read-only)
 
+- Model: Sonnet 4.5 (configurable via `REVIEW_MODEL` in config.ts)
 - Tools: Read, Glob, Grep, Task
 - Loads the target project's `CLAUDE.md` for architecture context
 - Explores the codebase, then scores the ticket
-- Outputs JSON with: easeScore, confidenceScore, spec, impactReport, affectedFiles, risks
-- Budget: $2.00 max, 15 turns max
+- Uses structured output (`json_schema`) to guarantee valid JSON response
+- Outputs: easeScore, confidenceScore, spec, impactReport, affectedFiles, risks
+- Budget: $2.00 max, 25 turns max
 - Typical cost: $0.15 - $0.50
 
 ### Execute Agent (write access)
 
+- Model: Sonnet 4.5 (configurable via `EXECUTE_MODEL` in config.ts)
 - Tools: Read, Glob, Grep, Edit, Write + limited Bash (git, build, test only)
 - Cannot: push, run destructive commands, modify databases, access web
 - Loads the target project's `CLAUDE.md` for project-specific rules
@@ -484,10 +487,12 @@ Settings in `config.ts`:
 
 | Setting | Default | Purpose |
 |---------|---------|---------|
+| `REVIEW_MODEL` | `claude-sonnet-4-5-20250929` | Claude model for review agent |
+| `EXECUTE_MODEL` | `claude-sonnet-4-5-20250929` | Claude model for execute agent |
 | `POLL_INTERVAL_MS` | 30000 | How often to check Notion (ms) |
 | `REVIEW_BUDGET_USD` | 2.00 | Max USD per review agent run |
 | `EXECUTE_BUDGET_USD` | 15.00 | Max USD per execute agent run |
-| `REVIEW_MAX_TURNS` | 15 | Max conversation turns for review |
+| `REVIEW_MAX_TURNS` | 25 | Max conversation turns for review |
 | `EXECUTE_MAX_TURNS` | 50 | Max conversation turns for execute |
 | `STALE_LOCK_MS` | 1800000 | Force-release hung agent locks (30 min) |
 

@@ -56,8 +56,12 @@ export const CONFIG = {
   REVIEW_BUDGET_USD: 2.00,
   EXECUTE_BUDGET_USD: 15.00,
 
+  // Agent models (override CLI default)
+  REVIEW_MODEL: 'claude-sonnet-4-5-20250929',
+  EXECUTE_MODEL: 'claude-sonnet-4-5-20250929',
+
   // Agent limits
-  REVIEW_MAX_TURNS: 15,
+  REVIEW_MAX_TURNS: 25,
   EXECUTE_MAX_TURNS: 50,
 
   // Stale lock timeout (30 minutes)
