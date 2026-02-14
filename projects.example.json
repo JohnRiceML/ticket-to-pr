@@ -1,0 +1,8 @@
+{
+  "projects": {
+    "MyProject": {
+      "directory": "/absolute/path/to/project",
+      "buildCommand": "npm run build"
+    }
+  }
+}

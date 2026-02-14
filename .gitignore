@@ -2,6 +2,7 @@ node_modules/
 dist/
 .env.local
 .env*.local
+projects.json
 *.log
 .planning/
 .claude/

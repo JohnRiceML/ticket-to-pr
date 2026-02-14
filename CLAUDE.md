@@ -329,7 +329,11 @@ gh auth status
 
 ### 5. Register Your Projects
 
-Edit `projects.json` — add your projects with their directory and optional build command:
+Copy the example and edit — add your projects with their directory and optional build command:
+
+```bash
+cp projects.example.json projects.json
+```
 
 ```json
 {
