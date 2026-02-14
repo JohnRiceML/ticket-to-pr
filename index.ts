@@ -536,7 +536,8 @@ async function main(): Promise<void> {
   log(DIM, 'CONFIG', `Poll interval: ${CONFIG.POLL_INTERVAL_MS / 1000}s`);
   log(DIM, 'CONFIG', `Max concurrent agents: ${CONFIG.MAX_CONCURRENT_AGENTS}${pro ? '' : ' (upgrade to Pro for up to 10)'}`);
   log(DIM, 'CONFIG', `Projects: ${projectNames.join(', ')}`);
-  log(DIM, 'CONFIG', `Review budget: $${CONFIG.REVIEW_BUDGET_USD} / Execute budget: $${CONFIG.EXECUTE_BUDGET_USD}`);
+  log(DIM, 'CONFIG', `Review: ${CONFIG.REVIEW_MODEL} ($${CONFIG.REVIEW_BUDGET_USD} budget)`);
+  log(DIM, 'CONFIG', `Execute: ${CONFIG.EXECUTE_MODEL} ($${CONFIG.EXECUTE_BUDGET_USD} budget)`);
   if (DRY_RUN) log(YELLOW, 'CONFIG', 'DRY-RUN mode: polling only, no agents will run');
   if (ONCE) log(YELLOW, 'CONFIG', 'ONE-SHOT mode: will exit after first poll');
   console.log('');

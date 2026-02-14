@@ -120,6 +120,12 @@ export async function runDoctor(): Promise<void> {
     track(null);
   }
 
+  // Models
+  console.log(`\n${BOLD}Models:${RESET}`);
+  const { CONFIG } = await import('./config.js');
+  printStatus(true, 'Review model', CONFIG.REVIEW_MODEL);
+  printStatus(true, 'Execute model', CONFIG.EXECUTE_MODEL);
+
   // Notion connectivity
   console.log(`\n${BOLD}Notion:${RESET}`);
 
@@ -319,8 +325,43 @@ export async function runInit(): Promise<void> {
 
     console.log('');
 
-    // Step 3: Projects
-    console.log(`${BOLD}Step 3: Projects${RESET}`);
+    // Step 3: Models
+    console.log(`${BOLD}Step 3: Models${RESET}`);
+    console.log(`  ${DIM}Choose which Claude model each agent uses.${RESET}`);
+    console.log(`  ${DIM}Sonnet = fast/cheap, Opus = best quality, Haiku = fastest/cheapest${RESET}\n`);
+
+    const modelChoices = [
+      { label: 'sonnet', id: 'claude-sonnet-4-5-20250929' },
+      { label: 'opus',   id: 'claude-opus-4-6' },
+      { label: 'haiku',  id: 'claude-haiku-4-5-20251001' },
+    ];
+    const modelLabels = modelChoices.map((m) => m.label).join('/');
+
+    const reviewModelDefault = existingEnv.REVIEW_MODEL
+      ? modelChoices.find((m) => m.id === existingEnv.REVIEW_MODEL)?.label ?? existingEnv.REVIEW_MODEL
+      : 'sonnet';
+    const reviewModelInput = await ask(rl, `Review model (${modelLabels})`, {
+      defaultValue: reviewModelDefault,
+      validate: (v) => (modelChoices.some((m) => m.label === v || m.id === v) ? null : `Choose: ${modelLabels}`),
+    });
+    const reviewModel = modelChoices.find((m) => m.label === reviewModelInput || m.id === reviewModelInput)?.id ?? reviewModelInput;
+
+    const executeModelDefault = existingEnv.EXECUTE_MODEL
+      ? modelChoices.find((m) => m.id === existingEnv.EXECUTE_MODEL)?.label ?? existingEnv.EXECUTE_MODEL
+      : 'opus';
+    const executeModelInput = await ask(rl, `Execute model (${modelLabels})`, {
+      defaultValue: executeModelDefault,
+      validate: (v) => (modelChoices.some((m) => m.label === v || m.id === v) ? null : `Choose: ${modelLabels}`),
+    });
+    const executeModel = modelChoices.find((m) => m.label === executeModelInput || m.id === executeModelInput)?.id ?? executeModelInput;
+
+    printStatus(true, 'Review model', reviewModel);
+    printStatus(true, 'Execute model', executeModel);
+
+    console.log('');
+
+    // Step 4: Projects
+    console.log(`${BOLD}Step 4: Projects${RESET}`);
 
     const projects: Array<{ name: string; dir: string; buildCmd?: string }> = [];
 
@@ -359,13 +400,15 @@ export async function runInit(): Promise<void> {
 
     console.log('');
 
-    // Step 4: Save
-    console.log(`${BOLD}Step 4: Save${RESET}`);
+    // Step 5: Save
+    console.log(`${BOLD}Step 5: Save${RESET}`);
 
     // Write .env.local
     const envUpdates: Record<string, string> = {
       NOTION_TOKEN: notionToken,
       NOTION_DATABASE_ID: databaseId,
+      REVIEW_MODEL: reviewModel,
+      EXECUTE_MODEL: executeModel,
     };
     writeEnvFile(envPath, envUpdates);
     printStatus(true, 'Wrote .env.local');

@@ -56,9 +56,13 @@ export const CONFIG = {
   REVIEW_BUDGET_USD: 2.00,
   EXECUTE_BUDGET_USD: 15.00,
 
-  // Agent models (override CLI default)
-  REVIEW_MODEL: 'claude-sonnet-4-5-20250929',
-  EXECUTE_MODEL: 'claude-opus-4-6',
+  // Agent models (env override → default)
+  get REVIEW_MODEL(): string {
+    return process.env.REVIEW_MODEL || 'claude-sonnet-4-5-20250929';
+  },
+  get EXECUTE_MODEL(): string {
+    return process.env.EXECUTE_MODEL || 'claude-opus-4-6';
+  },
 
   // Agent limits
   REVIEW_MAX_TURNS: 25,
