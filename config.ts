@@ -58,7 +58,7 @@ export const CONFIG = {
 
   // Agent models (override CLI default)
   REVIEW_MODEL: 'claude-sonnet-4-5-20250929',
-  EXECUTE_MODEL: 'claude-sonnet-4-5-20250929',
+  EXECUTE_MODEL: 'claude-opus-4-6',
 
   // Agent limits
   REVIEW_MAX_TURNS: 25,

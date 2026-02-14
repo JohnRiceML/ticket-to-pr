@@ -457,7 +457,7 @@ Replace `YOUR_USERNAME` and update the PATH to include your Node.js bin director
 
 ### Execute Agent (write access)
 
-- Model: Sonnet 4.5 (configurable via `EXECUTE_MODEL` in config.ts)
+- Model: Opus 4.6 (configurable via `EXECUTE_MODEL` in config.ts)
 - Tools: Read, Glob, Grep, Edit, Write + limited Bash (git, build, test only)
 - Cannot: push, run destructive commands, modify databases, access web
 - Loads the target project's `CLAUDE.md` for project-specific rules
@@ -488,7 +488,7 @@ Settings in `config.ts`:
 | Setting | Default | Purpose |
 |---------|---------|---------|
 | `REVIEW_MODEL` | `claude-sonnet-4-5-20250929` | Claude model for review agent |
-| `EXECUTE_MODEL` | `claude-sonnet-4-5-20250929` | Claude model for execute agent |
+| `EXECUTE_MODEL` | `claude-opus-4-6` | Claude model for execute agent |
 | `POLL_INTERVAL_MS` | 30000 | How often to check Notion (ms) |
 | `REVIEW_BUDGET_USD` | 2.00 | Max USD per review agent run |
 | `EXECUTE_BUDGET_USD` | 15.00 | Max USD per execute agent run |
