@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { mask, shellEscape, writeEnvFile, updateProjectsFile } from './lib/utils.js';
 import { getProjectNames, getProjectDir } from './lib/projects.js';
+import type { Client as NotionClient } from '@notionhq/client';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -146,9 +147,72 @@ export async function runDoctor(): Promise<void> {
 
       if (hasDbId) {
         try {
-          await client.databases.retrieve({ database_id: dbId });
+          const db = await client.databases.retrieve({ database_id: dbId }) as { properties: Record<string, { type: string; status?: unknown; select?: { options: Array<{ name: string }> } }> };
           printStatus(true, 'Database accessible');
           track(true);
+
+          // Schema validation
+          console.log(`\n${BOLD}Database Schema:${RESET}`);
+
+          const requiredProps: Array<{ name: string; altName?: string; expectedTypes: string[] }> = [
+            { name: 'Name', altName: 'Title', expectedTypes: ['title'] },
+            { name: 'Status', expectedTypes: ['status'] },
+            { name: 'Project', expectedTypes: ['select', 'rich_text'] },
+            { name: 'Ease', expectedTypes: ['number'] },
+            { name: 'Confidence', expectedTypes: ['number'] },
+            { name: 'Spec', expectedTypes: ['rich_text'] },
+            { name: 'Impact', expectedTypes: ['rich_text'] },
+            { name: 'Branch', expectedTypes: ['rich_text'] },
+            { name: 'Cost', expectedTypes: ['rich_text'] },
+            { name: 'PR URL', expectedTypes: ['url', 'rich_text'] },
+          ];
+
+          let schemaOk = 0;
+          let schemaMissing = 0;
+
+          for (const req of requiredProps) {
+            const prop = db.properties[req.name] || (req.altName ? db.properties[req.altName] : undefined);
+            if (prop && req.expectedTypes.includes(prop.type)) {
+              schemaOk++;
+            } else if (prop) {
+              printStatus(false, `Property "${req.name}"`, `found as ${prop.type}, expected ${req.expectedTypes.join(' or ')}`);
+              schemaMissing++;
+              track(false);
+            } else {
+              printStatus(false, `Missing property: "${req.name}"`, `(${req.expectedTypes.join(' or ')})`);
+              schemaMissing++;
+              track(false);
+            }
+          }
+
+          if (schemaMissing === 0) {
+            printStatus(true, `All ${requiredProps.length} required properties found`);
+            track(true);
+          } else {
+            printStatus(false, `${schemaMissing} properties missing or misconfigured`);
+          }
+
+          // Check Project select options vs projects.json
+          const projectProp = db.properties.Project;
+          if (projectProp?.type === 'select' && projectProp.select) {
+            const notionOptions = projectProp.select.options.map((o) => o.name);
+            const configProjects = getProjectNames();
+            const inNotionNotConfig = notionOptions.filter((n) => !configProjects.includes(n));
+            const inConfigNotNotion = configProjects.filter((n) => !notionOptions.includes(n));
+            if (inNotionNotConfig.length > 0) {
+              printStatus(null, 'Notion has projects not in projects.json', inNotionNotConfig.join(', '));
+              track(null);
+            }
+            if (inConfigNotNotion.length > 0) {
+              printStatus(null, 'projects.json has projects not in Notion', inConfigNotNotion.join(', '));
+              track(null);
+            }
+            if (inNotionNotConfig.length === 0 && inConfigNotNotion.length === 0 && configProjects.length > 0) {
+              printStatus(true, 'Project options match projects.json');
+              track(true);
+            }
+          }
+
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
           printStatus(false, 'Database accessible', msg);
@@ -175,21 +239,31 @@ export async function runDoctor(): Promise<void> {
   console.log(`\n${BOLD}Tools:${RESET}`);
 
   const gh = checkCommand('gh --version');
-  printStatus(gh.ok, 'gh installed', gh.ok ? gh.output.split('\n')[0] : 'not found');
-  track(gh.ok);
+  if (gh.ok) {
+    printStatus(true, 'gh installed', gh.output.split('\n')[0]);
+    track(true);
+  } else {
+    printStatus(null, 'gh not found', 'Install: brew install gh && gh auth login (required for automatic PR creation)');
+    track(null);
+  }
 
   if (gh.ok) {
     const ghAuth = checkCommand('gh auth status');
     printStatus(ghAuth.ok, 'gh authenticated');
     track(ghAuth.ok);
   } else {
-    printStatus(false, 'gh authenticated', 'skipped');
-    track(false);
+    printStatus(null, 'gh authenticated', 'skipped — gh not installed');
+    track(null);
   }
 
   const claude = checkCommand('claude --version');
-  printStatus(claude.ok, 'claude installed', claude.ok ? claude.output.split('\n')[0] : 'not found');
-  track(claude.ok);
+  if (claude.ok) {
+    printStatus(true, 'claude installed', claude.output.split('\n')[0]);
+    track(true);
+  } else {
+    printStatus(false, 'claude not found', 'Install: npm i -g @anthropic-ai/claude-code — required, agents cannot run without it');
+    track(false);
+  }
 
   // Projects
   console.log(`\n${BOLD}Projects:${RESET}`);
@@ -260,50 +334,81 @@ export async function runInit(): Promise<void> {
     // No existing file
   }
 
+  // Re-run detection
+  const envExists = existsSync(envPath);
+  const projectsExists = existsSync(projectsPath);
+
+  if (envExists && projectsExists) {
+    console.log(`  ${YELLOW}Existing configuration detected${RESET}`);
+    const mode = await ask(rl, 'Update existing config or start fresh?', {
+      defaultValue: 'update',
+      validate: (v) => {
+        const lower = v.toLowerCase();
+        return lower === 'update' || lower === 'fresh' ? null : 'Choose: update / fresh';
+      },
+    });
+    if (mode.toLowerCase() === 'fresh') {
+      existingEnv = {};
+      console.log(`  ${DIM}Starting from scratch${RESET}`);
+    } else {
+      console.log(`  ${DIM}Pre-filling from existing config${RESET}`);
+    }
+    console.log('');
+  }
+
   try {
     // Step 1: Notion
     console.log(`${BOLD}Step 1: Notion${RESET}`);
 
-    const tokenDefault = existingEnv.NOTION_TOKEN ? mask(existingEnv.NOTION_TOKEN) : undefined;
-    let notionToken = await ask(rl, 'Notion token', {
-      defaultValue: tokenDefault,
-      validate: (v) => (!v ? 'Token is required' : null),
-    });
-    // If user accepted the masked default, use the actual stored value
-    if (notionToken === tokenDefault && existingEnv.NOTION_TOKEN) {
-      notionToken = existingEnv.NOTION_TOKEN;
-    }
+    // -- Notion token with validation loop --
+    let notionToken = '';
+    let notionClient: NotionClient | null = null;
+    const { Client } = await import('@notionhq/client');
 
-    // Test token
-    let tokenValid = false;
-    try {
-      const { Client } = await import('@notionhq/client');
-      const client = new Client({ auth: notionToken });
-      await client.users.me({});
-      printStatus(true, 'Token valid');
-      tokenValid = true;
-    } catch {
-      printStatus(false, 'Token invalid — check your integration token');
-    }
+    while (true) {
+      const tokenDefault = existingEnv.NOTION_TOKEN ? mask(existingEnv.NOTION_TOKEN) : undefined;
+      let tokenInput = await ask(rl, 'Notion token', {
+        defaultValue: tokenDefault,
+        validate: (v) => (!v ? 'Token is required' : null),
+      });
+      // If user accepted the masked default, use the actual stored value
+      if (tokenInput === tokenDefault && existingEnv.NOTION_TOKEN) {
+        tokenInput = existingEnv.NOTION_TOKEN;
+      }
 
-    const dbDefault = existingEnv.NOTION_DATABASE_ID ? mask(existingEnv.NOTION_DATABASE_ID) : undefined;
-    let databaseId = await ask(rl, 'Database ID', {
-      defaultValue: dbDefault,
-      validate: (v) => (!v ? 'Database ID is required' : null),
-    });
-    if (databaseId === dbDefault && existingEnv.NOTION_DATABASE_ID) {
-      databaseId = existingEnv.NOTION_DATABASE_ID;
-    }
-
-    // Test database access
-    if (tokenValid) {
       try {
-        const { Client } = await import('@notionhq/client');
-        const client = new Client({ auth: notionToken });
-        await client.databases.retrieve({ database_id: databaseId });
-        printStatus(true, 'Database accessible');
+        const client = new Client({ auth: tokenInput });
+        const me = await client.users.me({}) as { bot?: { owner?: { workspace?: boolean }; workspace_name?: string } };
+        const workspaceName = me.bot?.workspace_name || 'connected';
+        printStatus(true, 'Token valid', workspaceName);
+        notionToken = tokenInput;
+        notionClient = client;
+        break;
       } catch {
-        printStatus(false, 'Database not accessible — check ID and integration connection');
+        printStatus(false, 'Token invalid — check your integration token and try again');
+      }
+    }
+
+    // -- Database ID with validation loop --
+    let databaseId = '';
+    while (true) {
+      const dbDefault = existingEnv.NOTION_DATABASE_ID ? mask(existingEnv.NOTION_DATABASE_ID) : undefined;
+      let dbInput = await ask(rl, 'Database ID', {
+        defaultValue: dbDefault,
+        validate: (v) => (!v ? 'Database ID is required' : null),
+      });
+      if (dbInput === dbDefault && existingEnv.NOTION_DATABASE_ID) {
+        dbInput = existingEnv.NOTION_DATABASE_ID;
+      }
+
+      try {
+        const db = await notionClient!.databases.retrieve({ database_id: dbInput }) as { title?: Array<{ plain_text: string }> };
+        const dbTitle = db.title?.map((t) => t.plain_text).join('') || 'untitled';
+        printStatus(true, 'Database accessible', dbTitle);
+        databaseId = dbInput;
+        break;
+      } catch {
+        printStatus(false, 'Database not accessible — check the ID and make sure the integration is connected to this database');
       }
     }
 
@@ -312,16 +417,26 @@ export async function runInit(): Promise<void> {
     // Step 2: Tools
     console.log(`${BOLD}Step 2: Tools${RESET}`);
 
-    const gh = checkCommand('gh --version');
-    printStatus(gh.ok, 'gh', gh.ok ? gh.output.split('\n')[0] : `not found — install with: brew install gh`);
-
-    if (gh.ok) {
-      const ghAuth = checkCommand('gh auth status');
-      printStatus(ghAuth.ok, 'gh authenticated', ghAuth.ok ? undefined : 'run: gh auth login');
+    const claude = checkCommand('claude --version');
+    if (claude.ok) {
+      printStatus(true, 'claude', claude.output.split('\n')[0]);
+    } else {
+      printStatus(false, 'Claude Code CLI not found');
+      console.log(`    ${DIM}Install: npm i -g @anthropic-ai/claude-code${RESET}`);
+      console.log(`    ${DIM}Then authenticate: claude (follow the prompts)${RESET}`);
+      console.log(`    ${RED}This is required — agents cannot run without it.${RESET}`);
     }
 
-    const claude = checkCommand('claude --version');
-    printStatus(claude.ok, 'claude', claude.ok ? claude.output.split('\n')[0] : 'not found — install with: npm i -g @anthropic-ai/claude-code');
+    const gh = checkCommand('gh --version');
+    if (gh.ok) {
+      printStatus(true, 'gh', gh.output.split('\n')[0]);
+      const ghAuth = checkCommand('gh auth status');
+      printStatus(ghAuth.ok, 'gh authenticated', ghAuth.ok ? undefined : 'run: gh auth login');
+    } else {
+      printStatus(null, 'GitHub CLI not found');
+      console.log(`    ${DIM}Install: brew install gh && gh auth login${RESET}`);
+      console.log(`    ${DIM}Required for automatic PR creation. Review/Execute still work without it.${RESET}`);
+    }
 
     console.log('');
 
@@ -383,9 +498,13 @@ export async function runInit(): Promise<void> {
       const gitExists = existsSync(join(dir, '.git'));
       if (gitExists) {
         const origin = checkCommand(`git -C ${shellEscape(dir)} remote get-url origin`);
-        printStatus(true, 'Git repo', origin.ok ? origin.output : 'no origin remote');
+        if (origin.ok) {
+          printStatus(true, 'Git repo', origin.output);
+        } else {
+          printStatus(null, 'Git repo found but no origin remote', `run: git -C ${dir} remote add origin <url>`);
+        }
       } else {
-        printStatus(false, 'Not a git repo', dir);
+        printStatus(null, 'Not a git repo', `${dir} — you can init git later`);
       }
 
       const buildCmd = await ask(rl, 'Build command (optional)');
@@ -396,6 +515,23 @@ export async function runInit(): Promise<void> {
       const another = await ask(rl, 'Add another project?', { defaultValue: 'N' });
       addMore = another.toLowerCase() === 'y' || another.toLowerCase() === 'yes';
       if (addMore) console.log('');
+    }
+
+    // Free tier guard
+    if (projects.length > 1) {
+      const { isPro } = await import('./config.js');
+      if (!isPro()) {
+        console.log('');
+        console.log(`  ${YELLOW}Free tier supports 1 project. You configured ${projects.length}.${RESET}`);
+        console.log(`  ${DIM}Upgrade to Pro for unlimited projects, or remove extras.${RESET}`);
+        const keepAll = await ask(rl, 'Keep only the first project?', { defaultValue: 'Y' });
+        if (keepAll.toLowerCase() === 'y' || keepAll.toLowerCase() === 'yes') {
+          const removed = projects.splice(1);
+          console.log(`  ${DIM}Kept "${projects[0].name}", removed: ${removed.map((p) => p.name).join(', ')}${RESET}`);
+        } else {
+          console.log(`  ${DIM}Keeping all ${projects.length} projects — startup will fail without a Pro license.${RESET}`);
+        }
+      }
     }
 
     console.log('');
@@ -420,7 +556,7 @@ export async function runInit(): Promise<void> {
     }
 
     console.log(`\n${BOLD}Ready!${RESET}`);
-    console.log(`  Test:  ${DIM}npx ticket-to-pr doctor${RESET}`);
+    console.log(`  Test:  ${DIM}npx tsx index.ts doctor${RESET}`);
     console.log(`  Docs:  ${DIM}https://github.com/JohnRiceML/ticket-to-pr${RESET}\n`);
   } finally {
     rl.close();

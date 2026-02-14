@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { CONFIG, REVIEW_OUTPUT_SCHEMA, isPro, type LockEntry, type TicketDetails, type ReviewOutput } from './config.js';
-import { sleep, clamp, extractJsonFromOutput, shellEscape, extractNumber, loadEnv, createWorktree, removeWorktree } from './lib/utils.js';
+import { sleep, clamp, extractJsonFromOutput, shellEscape, extractNumber, loadEnv, createWorktree, removeWorktree, getDefaultBranch } from './lib/utils.js';
 import { getProjectDir, getProjectNames, getBuildCommand } from './lib/projects.js';
 import {
   fetchTicketsByStatus,
@@ -144,7 +144,7 @@ async function runReviewAgent(ticket: TicketDetails): Promise<void> {
   // Prefer structured output (from outputFormat), fall back to JSON extraction from text
   const parsed = (structuredOutput as Record<string, unknown> | undefined) ?? extractJsonFromOutput(output);
   if (!parsed) {
-    throw new Error('Review agent did not produce valid JSON output');
+    throw new Error(`Review agent failed to return scores. The agent used all ${CONFIG.REVIEW_MAX_TURNS} turns without producing a result. Try simplifying the ticket description or increasing REVIEW_MAX_TURNS in config.ts.`);
   }
 
   const results: ReviewOutput = {
@@ -254,8 +254,9 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
     }
 
     // Count commits made
+    const baseBranch = getDefaultBranch(projectDir);
     try {
-      const commitLog = execSync(`git log main..${shellEscape(branchName)} --oneline`, { cwd: worktreeDir, stdio: 'pipe' });
+      const commitLog = execSync(`git log ${shellEscape(baseBranch)}..${shellEscape(branchName)} --oneline`, { cwd: worktreeDir, stdio: 'pipe' });
       commitCount = commitLog.toString().trim().split('\n').filter(Boolean).length;
     } catch {
       // If branch doesn't exist or no commits, count is 0
@@ -272,8 +273,14 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
         log(GREEN, 'VALIDATE', 'Build passed');
       } catch (e) {
         buildPassed = false;
-        const buildErr = e instanceof Error ? e.message : String(e);
-        throw new Error(`Build validation failed: ${buildErr}`);
+        let detail = '';
+        if (e && typeof e === 'object' && 'stderr' in e) {
+          detail = String((e as { stderr: unknown }).stderr).slice(0, 500);
+        }
+        if (!detail && e && typeof e === 'object' && 'stdout' in e) {
+          detail = String((e as { stdout: unknown }).stdout).slice(0, 500);
+        }
+        throw new Error(`Build validation failed.\nCommand: ${buildCmd}\nDirectory: ${worktreeDir}\n${detail ? `Output:\n${detail}` : (e instanceof Error ? e.message : String(e))}`);
       }
     }
 
@@ -303,7 +310,7 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
       ].join('\n');
 
       const prResult = execSync(
-        `gh pr create --title ${shellEscape(ticket.title)} --body ${shellEscape(prBody)} --base main --head ${branchName}`,
+        `gh pr create --title ${shellEscape(ticket.title)} --body ${shellEscape(prBody)} --base ${shellEscape(baseBranch)} --head ${branchName}`,
         { cwd: worktreeDir, stdio: 'pipe', timeout: 30_000 },
       );
       prUrl = prResult.toString().trim();
@@ -360,8 +367,9 @@ async function handleTicket(mode: 'review' | 'execute', ticket: TicketDetails): 
 
   // Check project mapping
   if (!getProjectDir(ticket.project)) {
-    log(RED, 'ERROR', `Unknown project "${ticket.project}" for ticket "${ticket.title}"`);
-    await writeFailure(ticket.id, `Unknown project: "${ticket.project}". Known projects: ${getProjectNames().join(', ')}`);
+    const known = getProjectNames();
+    log(RED, 'ERROR', `Unknown project "${ticket.project}" for ticket "${ticket.title}". Available projects: ${known.join(', ')}. Check that the Notion Project field matches projects.json exactly (case-sensitive).`);
+    await writeFailure(ticket.id, `Unknown project: "${ticket.project}". Available projects: ${known.join(', ')}. Check that the Notion Project field matches projects.json exactly (case-sensitive).`);
     return;
   }
 
@@ -509,11 +517,11 @@ function setupShutdown(): void {
 async function main(): Promise<void> {
   // Validate environment
   if (!process.env.NOTION_TOKEN) {
-    console.error('Missing NOTION_TOKEN in .env.local');
+    console.error("Missing NOTION_TOKEN. Run 'npx tsx index.ts init' to configure, or create .env.local manually.");
     process.exit(1);
   }
   if (!process.env.NOTION_DATABASE_ID) {
-    console.error('Missing NOTION_DATABASE_ID in .env.local');
+    console.error("Missing NOTION_DATABASE_ID. Run 'npx tsx index.ts init' to configure, or create .env.local manually.");
     process.exit(1);
   }
 

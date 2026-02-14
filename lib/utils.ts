@@ -152,6 +152,49 @@ export function updateProjectsFile(
   writeFileSync(filepath, JSON.stringify(data, null, 2) + '\n');
 }
 
+// -- Default branch detection --
+
+const defaultBranchCache = new Map<string, string>();
+
+export function getDefaultBranch(projectDir: string): string {
+  const cached = defaultBranchCache.get(projectDir);
+  if (cached) return cached;
+
+  let branch = 'main'; // ultimate fallback
+
+  // Try reading the remote HEAD symbolic ref
+  try {
+    const ref = execSync('git symbolic-ref refs/remotes/origin/HEAD', {
+      cwd: projectDir,
+      stdio: 'pipe',
+    }).toString().trim();
+    // refs/remotes/origin/main → main
+    const parsed = ref.replace('refs/remotes/origin/', '');
+    if (parsed) branch = parsed;
+  } catch {
+    // Remote HEAD not set — try common branch names
+    try {
+      execSync('git rev-parse --verify main', { cwd: projectDir, stdio: 'pipe' });
+      branch = 'main';
+    } catch {
+      try {
+        execSync('git rev-parse --verify master', { cwd: projectDir, stdio: 'pipe' });
+        branch = 'master';
+      } catch {
+        // Give up, default to 'main'
+      }
+    }
+  }
+
+  defaultBranchCache.set(projectDir, branch);
+  return branch;
+}
+
+/** Reset the default branch cache (for tests). */
+export function _resetDefaultBranchCache(): void {
+  defaultBranchCache.clear();
+}
+
 // -- Git worktree helpers --
 
 export function ensureWorktreesIgnored(projectDir: string): void {
