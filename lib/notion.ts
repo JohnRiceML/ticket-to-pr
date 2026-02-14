@@ -19,9 +19,9 @@ function databaseId(): string {
   return process.env.NOTION_DATABASE_ID!;
 }
 
-// -- Helpers --
+// -- Helpers (exported for testing) --
 
-function extractPlainText(richText: RichTextItemResponse[]): string {
+export function extractPlainText(richText: RichTextItemResponse[]): string {
   return richText.map((t) => t.plain_text).join('');
 }
 
@@ -50,7 +50,7 @@ function extractStatus(page: PageObjectResponse): string {
   return prop?.status?.name ?? '';
 }
 
-function extractProjectName(page: PageObjectResponse): string {
+export function extractProjectName(page: PageObjectResponse): string {
   // Support both Select and Rich Text types for Project
   const prop = getProperty(page, 'Project') as Record<string, unknown> | undefined;
   if (!prop) return '';
@@ -65,7 +65,7 @@ function extractProjectName(page: PageObjectResponse): string {
   return '';
 }
 
-function pageToTicket(page: PageObjectResponse): NotionTicket {
+export function pageToTicket(page: PageObjectResponse): NotionTicket {
   return {
     id: page.id,
     title: extractTitle(page),
@@ -74,7 +74,7 @@ function pageToTicket(page: PageObjectResponse): NotionTicket {
   };
 }
 
-function blockToMarkdown(block: BlockObjectResponse): string {
+export function blockToMarkdown(block: BlockObjectResponse): string {
   const type = block.type as string;
   const data = (block as Record<string, unknown>)[type] as
     | { rich_text?: RichTextItemResponse[] }
@@ -262,7 +262,7 @@ export async function addComment(pageId: string, text: string): Promise<void> {
   }
 }
 
-function truncate(str: string, maxLen: number): string {
+export function truncate(str: string, maxLen: number): string {
   if (str.length <= maxLen) return str;
   return str.slice(0, maxLen - 3) + '...';
 }

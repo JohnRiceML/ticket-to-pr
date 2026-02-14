@@ -6,21 +6,32 @@ const LICENSE_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
 MCowBQYDK2VwAyEAGtiFnwyCAHWl1b1yzm2wY14LiY8e0xfsXhQULcRaStM=
 -----END PUBLIC KEY-----`;
 
+let _proCache: boolean | null = null;
+
 export function isPro(): boolean {
+  if (_proCache !== null) return _proCache;
+
   const key = process.env.LICENSE_KEY;
-  if (!key?.startsWith('ncb_pro_')) return false;
+  if (!key?.startsWith('ncb_pro_')) {
+    _proCache = false;
+    return false;
+  }
 
   const rest = key.slice('ncb_pro_'.length);
   const dotIndex = rest.indexOf('.');
-  if (dotIndex === -1) return false;
+  if (dotIndex === -1) {
+    _proCache = false;
+    return false;
+  }
 
   try {
     const buyerId = Buffer.from(rest.slice(0, dotIndex), 'base64url');
     const signature = Buffer.from(rest.slice(dotIndex + 1), 'base64url');
-    return verify(null, buyerId, LICENSE_PUBLIC_KEY, signature);
+    _proCache = verify(null, buyerId, LICENSE_PUBLIC_KEY, signature);
   } catch {
-    return false;
+    _proCache = false;
   }
+  return _proCache;
 }
 
 const FREE_MAX_PROJECTS = 1;
@@ -41,13 +52,6 @@ export const CONFIG = {
     FAILED: 'Failed',
   },
 
-  // Project name (Notion select) -> local directory
-  // Example:
-  //   'MyApp': '/Users/yourname/Projects/MyApp',
-  PROJECTS: {
-    // Add your projects here
-  } as Record<string, string>,
-
   // Agent budgets
   REVIEW_BUDGET_USD: 2.00,
   EXECUTE_BUDGET_USD: 15.00,
@@ -55,11 +59,6 @@ export const CONFIG = {
   // Agent limits
   REVIEW_MAX_TURNS: 15,
   EXECUTE_MAX_TURNS: 50,
-
-  // Build validation command per project (optional)
-  BUILD_COMMANDS: {
-    // Example: 'MyApp': 'npm run build',
-  } as Record<string, string>,
 
   // Stale lock timeout (30 minutes)
   STALE_LOCK_MS: 30 * 60 * 1000,

@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { CONFIG, isPro, type LockEntry, type TicketDetails, type ReviewOutput } from './config.js';
+import { sleep, clamp, extractJsonFromOutput, shellEscape, extractNumber, loadEnv, createWorktree, removeWorktree } from './lib/utils.js';
+import { getProjectDir, getProjectNames, getBuildCommand } from './lib/projects.js';
 import {
   fetchTicketsByStatus,
   fetchTicketDetails,
@@ -63,7 +65,7 @@ const executePrompt = readFileSync(join(__dirname, 'prompts', 'execute.md'), 'ut
 // -- Agent Runner --
 
 async function runReviewAgent(ticket: TicketDetails): Promise<void> {
-  const projectDir = CONFIG.PROJECTS[ticket.project];
+  const projectDir = getProjectDir(ticket.project);
   if (!projectDir) {
     throw new Error(`Unknown project: "${ticket.project}"`);
   }
@@ -163,7 +165,7 @@ async function runReviewAgent(ticket: TicketDetails): Promise<void> {
 }
 
 async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
-  const projectDir = CONFIG.PROJECTS[ticket.project];
+  const projectDir = getProjectDir(ticket.project);
   if (!projectDir) {
     throw new Error(`Unknown project: "${ticket.project}"`);
   }
@@ -176,6 +178,7 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
     .replace(/^-|-$/g, '')
     .slice(0, 40);
   const branchName = `notion/${shortId}/${slug}`;
+  const worktreeDir = join(projectDir, '.worktrees', branchName.replace(/\//g, '_'));
 
   log(MAGENTA, 'EXECUTE', `Starting execution for "${ticket.title}" on branch ${branchName}`);
   const startTime = Date.now();
@@ -183,17 +186,8 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
   // Move to In Progress immediately
   await moveTicketStatus(ticket.id, CONFIG.COLUMNS.IN_PROGRESS);
 
-  // Git: create and checkout branch
-  try {
-    execSync(`git checkout -b ${branchName}`, { cwd: projectDir, stdio: 'pipe' });
-  } catch {
-    // Branch might already exist (retry scenario)
-    try {
-      execSync(`git checkout ${branchName}`, { cwd: projectDir, stdio: 'pipe' });
-    } catch (e) {
-      throw new Error(`Failed to checkout branch ${branchName}: ${e}`);
-    }
-  }
+  // Git: create isolated worktree
+  createWorktree(projectDir, branchName, worktreeDir);
 
   let cost = 0;
   let commitCount = 0;
@@ -221,7 +215,7 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
     const messages = query({
       prompt,
       options: {
-        cwd: projectDir,
+        cwd: worktreeDir,
         allowedTools: [
           'Read', 'Glob', 'Grep', 'Edit', 'Write', 'Task',
           'Bash(git add:*)', 'Bash(git commit:*)', 'Bash(git status:*)',
@@ -251,7 +245,7 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
 
     // Count commits made
     try {
-      const commitLog = execSync(`git log main..${branchName} --oneline`, { cwd: projectDir, stdio: 'pipe' });
+      const commitLog = execSync(`git log main..${shellEscape(branchName)} --oneline`, { cwd: worktreeDir, stdio: 'pipe' });
       commitCount = commitLog.toString().trim().split('\n').filter(Boolean).length;
     } catch {
       // If branch doesn't exist or no commits, count is 0
@@ -259,12 +253,12 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
     }
 
     // Post-execution: validate build
-    const buildCmd = CONFIG.BUILD_COMMANDS[ticket.project];
+    const buildCmd = getBuildCommand(ticket.project);
     let buildPassed = true;
     if (buildCmd) {
       log(YELLOW, 'VALIDATE', `Running: ${buildCmd}`);
       try {
-        execSync(buildCmd, { cwd: projectDir, stdio: 'pipe', timeout: 120_000 });
+        execSync(buildCmd, { cwd: worktreeDir, stdio: 'pipe', timeout: 120_000 });
         log(GREEN, 'VALIDATE', 'Build passed');
       } catch (e) {
         buildPassed = false;
@@ -275,7 +269,7 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
 
     // Push branch
     log(CYAN, 'PUSH', `Pushing ${branchName}`);
-    execSync(`git push -u origin ${branchName}`, { cwd: projectDir, stdio: 'pipe' });
+    execSync(`git push -u origin ${shellEscape(branchName)}`, { cwd: worktreeDir, stdio: 'pipe' });
 
     // Create PR
     let prUrl = '';
@@ -300,7 +294,7 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
 
       const prResult = execSync(
         `gh pr create --title ${shellEscape(ticket.title)} --body ${shellEscape(prBody)} --base main --head ${branchName}`,
-        { cwd: projectDir, stdio: 'pipe', timeout: 30_000 },
+        { cwd: worktreeDir, stdio: 'pipe', timeout: 30_000 },
       );
       prUrl = prResult.toString().trim();
       log(GREEN, 'PR', `Created: ${prUrl}`);
@@ -338,21 +332,10 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
       `Cost: $${cost.toFixed(2)} | Duration: ${duration}s`,
     ].join('\n');
     await addComment(ticket.id, comment);
-
-    // On failure, clean up: checkout main, optionally delete branch
-    try {
-      execSync('git checkout main', { cwd: projectDir, stdio: 'pipe' });
-    } catch {
-      // Best effort
-    }
     throw error;
   } finally {
-    // Always return to main branch
-    try {
-      execSync('git checkout main', { cwd: projectDir, stdio: 'pipe' });
-    } catch {
-      // Best effort
-    }
+    // Always clean up the worktree
+    removeWorktree(projectDir, worktreeDir);
   }
 }
 
@@ -366,9 +349,9 @@ async function handleTicket(mode: 'review' | 'execute', ticket: TicketDetails): 
   }
 
   // Check project mapping
-  if (!CONFIG.PROJECTS[ticket.project]) {
+  if (!getProjectDir(ticket.project)) {
     log(RED, 'ERROR', `Unknown project "${ticket.project}" for ticket "${ticket.title}"`);
-    await writeFailure(ticket.id, `Unknown project: "${ticket.project}". Known projects: ${Object.keys(CONFIG.PROJECTS).join(', ')}`);
+    await writeFailure(ticket.id, `Unknown project: "${ticket.project}". Known projects: ${getProjectNames().join(', ')}`);
     return;
   }
 
@@ -472,7 +455,9 @@ async function poll(): Promise<void> {
     for (const { ticket, mode } of ticketsToProcess) {
       if (shuttingDown) break;
       const details = await fetchTicketDetails(ticket.id);
-      handleTicket(mode, details);
+      handleTicket(mode, details).catch((err) => {
+        log(RED, 'UNHANDLED', `Unexpected error in ${mode} for "${details.title}": ${err instanceof Error ? err.message : err}`);
+      });
     }
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
@@ -525,13 +510,13 @@ async function main(): Promise<void> {
   setupShutdown();
 
   const pro = isPro();
-  const projectNames = Object.keys(CONFIG.PROJECTS);
+  const projectNames = getProjectNames();
 
   // Free tier: enforce 1-project limit
   if (!pro && projectNames.length > CONFIG.FREE_MAX_PROJECTS) {
     console.error(
       `Free tier supports ${CONFIG.FREE_MAX_PROJECTS} project. You have ${projectNames.length} configured.` +
-      `\nRemove extra projects from config.ts, or add a LICENSE_KEY to .env.local to unlock unlimited projects.`
+      `\nRemove extra projects from projects.json, or add a LICENSE_KEY to .env.local to unlock unlimited projects.`
     );
     process.exit(1);
   }
@@ -563,93 +548,6 @@ async function main(): Promise<void> {
   while (!shuttingDown) {
     await sleep(CONFIG.POLL_INTERVAL_MS);
     await poll();
-  }
-}
-
-// -- Utilities --
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function clamp(val: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, val));
-}
-
-function extractJsonFromOutput(text: string): Record<string, unknown> | null {
-  // Find the last JSON code block
-  const codeBlockRegex = /```(?:json)?\s*\n([\s\S]*?)\n```/g;
-  let lastMatch: string | null = null;
-  let match;
-
-  while ((match = codeBlockRegex.exec(text)) !== null) {
-    lastMatch = match[1];
-  }
-
-  // Try parsing the last code block first
-  if (lastMatch) {
-    try {
-      return JSON.parse(lastMatch);
-    } catch {
-      // Fall through
-    }
-  }
-
-  // Try parsing the entire text as JSON (in case no code blocks)
-  try {
-    return JSON.parse(text);
-  } catch {
-    // Fall through
-  }
-
-  // Try finding a raw JSON object
-  const jsonRegex = /\{[\s\S]*"easeScore"[\s\S]*\}/;
-  const rawMatch = text.match(jsonRegex);
-  if (rawMatch) {
-    try {
-      return JSON.parse(rawMatch[0]);
-    } catch {
-      // Give up
-    }
-  }
-
-  return null;
-}
-
-function shellEscape(str: string): string {
-  return `'${str.replace(/'/g, "'\\''")}'`;
-}
-
-function extractNumber(ticket: TicketDetails, field: string): string {
-  // Pull ease/confidence from the impact text if available
-  const text = ticket.impact ?? '';
-  if (field === 'ease') {
-    const match = text.match(/Ease[:\s]*(\d+)/i);
-    return match ? match[1] : '?';
-  }
-  if (field === 'confidence') {
-    const match = text.match(/Confidence[:\s]*(\d+)/i);
-    return match ? match[1] : '?';
-  }
-  return '?';
-}
-
-function loadEnv(filepath: string): void {
-  try {
-    const content = readFileSync(filepath, 'utf-8');
-    for (const line of content.split('\n')) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
-      const eqIndex = trimmed.indexOf('=');
-      if (eqIndex === -1) continue;
-      const key = trimmed.slice(0, eqIndex).trim();
-      const value = trimmed.slice(eqIndex + 1).trim();
-      if (!process.env[key]) {
-        process.env[key] = value;
-      }
-    }
-  } catch {
-    // .env.local doesn't exist, that's fine if env vars are set elsewhere
   }
 }
 

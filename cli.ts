@@ -1,8 +1,10 @@
 import { createInterface, type Interface } from 'node:readline';
 import { execSync } from 'node:child_process';
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { mask, shellEscape, writeEnvFile, updateProjectsFile } from './lib/utils.js';
+import { getProjectNames, getProjectDir } from './lib/projects.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -20,11 +22,6 @@ function printStatus(ok: boolean | null, label: string, detail?: string): void {
   const icon = ok === true ? `${GREEN}✓${RESET}` : ok === false ? `${RED}✗${RESET}` : `${YELLOW}○${RESET}`;
   const line = detail ? `${icon} ${label} ${DIM}${detail}${RESET}` : `${icon} ${label}`;
   console.log(`  ${line}`);
-}
-
-function mask(str: string): string {
-  if (str.length <= 8) return '****';
-  return str.slice(0, 4) + '...' + str.slice(-4);
 }
 
 function checkCommand(cmd: string): { ok: boolean; output: string } {
@@ -56,94 +53,6 @@ function ask(
       resolve(value);
     });
   });
-}
-
-function writeEnvFile(filepath: string, updates: Record<string, string>): void {
-  let lines: string[] = [];
-  try {
-    lines = readFileSync(filepath, 'utf-8').split('\n');
-  } catch {
-    // File doesn't exist yet
-  }
-
-  const remaining = { ...updates };
-
-  // Update existing keys in place
-  const updatedLines = lines.map((line) => {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) return line;
-    const eqIndex = trimmed.indexOf('=');
-    if (eqIndex === -1) return line;
-    const key = trimmed.slice(0, eqIndex).trim();
-    if (key in remaining) {
-      const val = remaining[key];
-      delete remaining[key];
-      return `${key}=${val}`;
-    }
-    return line;
-  });
-
-  // Append any new keys
-  for (const [key, val] of Object.entries(remaining)) {
-    updatedLines.push(`${key}=${val}`);
-  }
-
-  writeFileSync(filepath, updatedLines.join('\n'));
-}
-
-function updateConfigFile(
-  filepath: string,
-  projects: Array<{ name: string; dir: string; buildCmd?: string }>,
-): void {
-  let content = readFileSync(filepath, 'utf-8');
-
-  for (const proj of projects) {
-    // Insert into PROJECTS block
-    const projectEntry = `    '${proj.name}': '${proj.dir}',`;
-    const projectsAnchor = '} as Record<string, string>,';
-
-    // Find the PROJECTS block anchor (first occurrence)
-    const projIdx = content.indexOf(projectsAnchor);
-    if (projIdx !== -1) {
-      // Check if this project already exists
-      const existingPattern = new RegExp(`'${escapeRegex(proj.name)}':\\s*'[^']*'`);
-      if (existingPattern.test(content.slice(0, projIdx))) {
-        // Replace existing entry
-        content = content.replace(existingPattern, `'${proj.name}': '${proj.dir}'`);
-      } else {
-        // Insert before the closing anchor
-        content = content.slice(0, projIdx) + projectEntry + '\n  ' + content.slice(projIdx);
-      }
-    }
-
-    // Insert into BUILD_COMMANDS block (second occurrence of anchor)
-    if (proj.buildCmd) {
-      const buildEntry = `    '${proj.name}': '${proj.buildCmd}',`;
-      // Find the second occurrence of the anchor
-      const firstAnchorEnd = content.indexOf(projectsAnchor) + projectsAnchor.length;
-      const buildIdx = content.indexOf(projectsAnchor, firstAnchorEnd);
-      if (buildIdx !== -1) {
-        const beforeBuild = content.slice(0, buildIdx);
-        const afterBuild = content.slice(buildIdx);
-        const buildPattern = new RegExp(`'${escapeRegex(proj.name)}':\\s*'[^']*'`);
-        // Check in the BUILD_COMMANDS section only (between firstAnchorEnd and buildIdx)
-        const buildSection = content.slice(firstAnchorEnd, buildIdx);
-        if (buildPattern.test(buildSection)) {
-          // Replace in the build section
-          const updatedSection = buildSection.replace(buildPattern, `'${proj.name}': '${proj.buildCmd}'`);
-          content = content.slice(0, firstAnchorEnd) + updatedSection + afterBuild;
-        } else {
-          content = beforeBuild + buildEntry + '\n  ' + afterBuild;
-        }
-      }
-    }
-  }
-
-  writeFileSync(filepath, content);
-}
-
-function escapeRegex(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 // -- Doctor --
@@ -279,15 +188,14 @@ export async function runDoctor(): Promise<void> {
   // Projects
   console.log(`\n${BOLD}Projects:${RESET}`);
 
-  const { CONFIG } = await import('./config.js');
-  const projectNames = Object.keys(CONFIG.PROJECTS);
+  const projectNames = getProjectNames();
 
   if (projectNames.length === 0) {
-    printStatus(null, 'No projects configured', 'add projects in config.ts or run init');
+    printStatus(null, 'No projects configured', 'add projects to projects.json or run init');
     track(null);
   } else {
     for (const name of projectNames) {
-      const dir = CONFIG.PROJECTS[name];
+      const dir = getProjectDir(name)!;
       const dirExists = existsSync(dir);
       if (!dirExists) {
         printStatus(false, `${name}`, `${dir} (directory not found)`);
@@ -302,7 +210,7 @@ export async function runDoctor(): Promise<void> {
         continue;
       }
 
-      const origin = checkCommand(`git -C '${dir}' remote get-url origin`);
+      const origin = checkCommand(`git -C ${shellEscape(dir)} remote get-url origin`);
       if (!origin.ok) {
         printStatus(false, `${name}`, `${dir} (no origin remote)`);
         track(false);
@@ -329,7 +237,7 @@ export async function runInit(): Promise<void> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
 
   const envPath = join(__dirname, '.env.local');
-  const configPath = join(__dirname, 'config.ts');
+  const projectsPath = join(__dirname, 'projects.json');
 
   // Load existing env values for defaults
   let existingEnv: Record<string, string> = {};
@@ -433,7 +341,7 @@ export async function runInit(): Promise<void> {
       // Validate git repo
       const gitExists = existsSync(join(dir, '.git'));
       if (gitExists) {
-        const origin = checkCommand(`git -C '${dir}' remote get-url origin`);
+        const origin = checkCommand(`git -C ${shellEscape(dir)} remote get-url origin`);
         printStatus(true, 'Git repo', origin.ok ? origin.output : 'no origin remote');
       } else {
         printStatus(false, 'Not a git repo', dir);
@@ -462,10 +370,10 @@ export async function runInit(): Promise<void> {
     writeEnvFile(envPath, envUpdates);
     printStatus(true, 'Wrote .env.local');
 
-    // Update config.ts
+    // Update projects.json
     if (projects.length > 0) {
-      updateConfigFile(configPath, projects);
-      printStatus(true, 'Updated config.ts');
+      updateProjectsFile(projectsPath, projects);
+      printStatus(true, 'Updated projects.json');
     }
 
     console.log(`\n${BOLD}Ready!${RESET}`);
