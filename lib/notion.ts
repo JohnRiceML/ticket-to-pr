@@ -163,19 +163,12 @@ export async function writeReviewResults(pageId: string, results: ReviewOutput):
     Ease: { number: results.easeScore },
     Confidence: { number: results.confidenceScore },
     Spec: {
-      rich_text: [{ text: { content: truncate(results.spec, 2000) } }],
+      rich_text: chunkRichText(results.spec),
     },
     Impact: {
-      rich_text: [
-        {
-          text: {
-            content: truncate(
-              `${results.impactReport}\n\nFiles: ${results.affectedFiles.join(', ')}${results.risks ? `\n\nRisks: ${results.risks}` : ''}`,
-              2000,
-            ),
-          },
-        },
-      ],
+      rich_text: chunkRichText(
+        `${results.impactReport}\n\nFiles: ${results.affectedFiles.join(', ')}${results.risks ? `\n\nRisks: ${results.risks}` : ''}`,
+      ),
     },
   };
 
@@ -240,7 +233,7 @@ export async function writeFailure(pageId: string, error: string): Promise<void>
     properties: {
       Status: { status: { name: CONFIG.COLUMNS.FAILED } },
       Impact: {
-        rich_text: [{ text: { content: truncate(`ERROR: ${error}`, 2000) } }],
+        rich_text: chunkRichText(`ERROR: ${error}`),
       },
     },
   });
@@ -265,4 +258,17 @@ export async function addComment(pageId: string, text: string): Promise<void> {
 export function truncate(str: string, maxLen: number): string {
   if (str.length <= maxLen) return str;
   return str.slice(0, maxLen - 3) + '...';
+}
+
+/** Chunk text into Notion rich_text segments (each max 2000 chars). */
+export function chunkRichText(str: string): Array<{ text: { content: string } }> {
+  const LIMIT = 2000;
+  if (str.length <= LIMIT) {
+    return [{ text: { content: str } }];
+  }
+  const chunks: Array<{ text: { content: string } }> = [];
+  for (let i = 0; i < str.length; i += LIMIT) {
+    chunks.push({ text: { content: str.slice(i, i + LIMIT) } });
+  }
+  return chunks;
 }

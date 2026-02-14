@@ -8,6 +8,7 @@ import {
   extractPlainText,
   blockToMarkdown,
   truncate,
+  chunkRichText,
   pageToTicket,
   extractProjectName,
 } from '../notion.js';
@@ -170,6 +171,31 @@ describe('truncate', () => {
 
   it('truncates with ellipsis when over limit', () => {
     expect(truncate('hello world!', 8)).toBe('hello...');
+  });
+});
+
+// -- chunkRichText --
+
+describe('chunkRichText', () => {
+  it('returns single segment for short text', () => {
+    const result = chunkRichText('hello');
+    expect(result).toEqual([{ text: { content: 'hello' } }]);
+  });
+
+  it('returns single segment at exactly 2000 chars', () => {
+    const str = 'x'.repeat(2000);
+    const result = chunkRichText(str);
+    expect(result).toHaveLength(1);
+    expect(result[0].text.content).toHaveLength(2000);
+  });
+
+  it('chunks text over 2000 chars into multiple segments', () => {
+    const str = 'a'.repeat(4500);
+    const result = chunkRichText(str);
+    expect(result).toHaveLength(3);
+    expect(result[0].text.content).toHaveLength(2000);
+    expect(result[1].text.content).toHaveLength(2000);
+    expect(result[2].text.content).toHaveLength(500);
   });
 });
 
