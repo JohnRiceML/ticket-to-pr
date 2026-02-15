@@ -79,24 +79,22 @@ The human decision point is between **Scored** and **Execute**. You always revie
 ## Quick Start
 
 ```bash
-git clone <repo-url> ~/Projects/ticket-to-pr
-cd ~/Projects/ticket-to-pr
-npm install
+npm install -g ticket-to-pr
 
 # Guided setup — configures Notion, projects, and .env.local
-npx tsx index.ts init
+ticket-to-pr init
 
 # Verify everything is working
-npx tsx index.ts doctor
+ticket-to-pr doctor
 
 # Test connection
-npx tsx index.ts --dry-run --once
+ticket-to-pr --dry-run --once
 
 # Run once (process all pending tickets)
-npx tsx index.ts --once
+ticket-to-pr --once
 
 # Run continuously (polls every 30s)
-npx tsx index.ts
+ticket-to-pr
 ```
 
 ## Testing & Verification
@@ -121,7 +119,7 @@ gh auth status
 # Should show "Logged in to github.com as yourname"
 
 # Notion connection working
-npx tsx index.ts --dry-run --once
+ticket-to-pr --dry-run --once
 # Should connect without errors and report "No tickets to process"
 ```
 
@@ -145,7 +143,7 @@ Create a new ticket in your Notion board with these exact values:
 1. **Drag the ticket to "Review" column** in Notion
 2. **Run TicketToPR once**:
    ```bash
-   npx tsx index.ts --once
+   ticket-to-pr --once
    ```
 3. **Watch the terminal output** — you should see:
    ```
@@ -169,7 +167,7 @@ Create a new ticket in your Notion board with these exact values:
 2. **Drag the ticket to "Execute" column** in Notion
 3. **Run TicketToPR again**:
    ```bash
-   npx tsx index.ts --once
+   ticket-to-pr --once
    ```
 4. **Watch the terminal output** — you should see:
    ```
@@ -360,7 +358,7 @@ The `Project` field on each Notion ticket must match a key in `projects.json` ex
 
 ```bash
 # Should connect to Notion and report "No tickets to process"
-npx tsx index.ts --dry-run --once
+ticket-to-pr --dry-run --once
 ```
 
 ### 7. Create a Test Ticket
@@ -370,9 +368,9 @@ npx tsx index.ts --dry-run --once
 3. Project: `PeekABoo` (or your project name)
 4. Description: `Create a simple GET endpoint at /api/test/hello that returns { message: "hello world" }`
 5. Drag to **Review** column
-6. Run `npx tsx index.ts --once` and watch it score the ticket
+6. Run `ticket-to-pr --once` and watch it score the ticket
 7. Check Notion — ticket should be in **Scored** with Ease, Confidence, Spec, Impact filled in
-8. Drag to **Execute**, run `npx tsx index.ts --once` again
+8. Drag to **Execute**, run `ticket-to-pr --once` again
 9. Check Notion — ticket should be in **PR Ready** with Branch, Cost, and PR link filled in
 
 ## Running as a Background Service (macOS)
@@ -411,12 +409,10 @@ cat > ~/Library/LaunchAgents/com.ticket-to-pr.plist << 'EOF'
     <string>com.ticket-to-pr</string>
     <key>ProgramArguments</key>
     <array>
-        <string>npx</string>
-        <string>tsx</string>
-        <string>index.ts</string>
+        <string>ticket-to-pr</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Users/YOUR_USERNAME/Projects/ticket-to-pr</string>
+    <string>/Users/YOUR_USERNAME</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>

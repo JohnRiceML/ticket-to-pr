@@ -2,6 +2,8 @@
 
 # TicketToPR
 
+[![npm version](https://img.shields.io/npm/v/ticket-to-pr.svg)](https://www.npmjs.com/package/ticket-to-pr)
+
 ### Drag a Notion ticket. Get a pull request.
 
 AI-powered development automation that turns your Notion backlog into shipped code.
@@ -102,24 +104,22 @@ The rhythm is **you, AI, you, AI, AI, you** — three human touchpoints, three A
 ## Quick Start
 
 ```bash
-git clone https://github.com/JohnRiceML/ticket-to-pr.git
-cd ticket-to-pr
-npm install
+npm install -g ticket-to-pr
 
 # Guided setup — configures Notion, projects, and .env.local
-npx tsx index.ts init
+ticket-to-pr init
 
 # Verify everything is working
-npx tsx index.ts doctor
+ticket-to-pr doctor
 
 # Test connection
-npx tsx index.ts --dry-run --once
+ticket-to-pr --dry-run --once
 
 # Run once (process all pending tickets)
-npx tsx index.ts --once
+ticket-to-pr --once
 
 # Run continuously (polls every 30s)
-npx tsx index.ts
+ticket-to-pr
 ```
 
 ## Prerequisites
@@ -186,7 +186,7 @@ https://www.notion.so/yourteam/abc123def456789...?v=...
 The guided setup configures everything interactively — Notion credentials, tools, models, and projects:
 
 ```bash
-npx tsx index.ts init
+ticket-to-pr init
 ```
 
 Init validates as you go: invalid Notion tokens and database IDs are rejected immediately (you'll be re-prompted), and it warns about missing tools. If you re-run `init` later, it detects existing config and asks whether to update or start fresh.
@@ -194,10 +194,10 @@ Init validates as you go: invalid Notion tokens and database IDs are rejected im
 ### 4. Verify
 
 ```bash
-npx tsx index.ts doctor
+ticket-to-pr doctor
 # Should show all checks passing, including database schema validation
 
-npx tsx index.ts --dry-run --once
+ticket-to-pr --dry-run --once
 # Should connect to Notion and report "No tickets to process"
 ```
 
@@ -218,7 +218,7 @@ npx tsx index.ts --dry-run --once
 
 ### `init` — Guided Setup
 
-Run `npx tsx index.ts init` to configure TicketToPR interactively:
+Run `ticket-to-pr init` to configure TicketToPR interactively:
 
 ```
 TicketToPR Setup
@@ -255,7 +255,7 @@ Step 5: Save
   ✓ Updated projects.json
 
 Ready!
-  Test:  npx tsx index.ts doctor
+  Test:  ticket-to-pr doctor
   Docs:  https://www.tickettopr.com
 ```
 
@@ -266,7 +266,7 @@ Ready!
 
 ### `doctor` — Diagnostic Check
 
-Run `npx tsx index.ts doctor` to verify your setup. It checks everything non-interactively:
+Run `ticket-to-pr doctor` to verify your setup. It checks everything non-interactively:
 
 ```
 TicketToPR Doctor
@@ -314,9 +314,9 @@ Docs: https://www.tickettopr.com
 3. **Project**: Your project name from `projects.json`
 4. **Description**: `Create a simple GET endpoint at /api/test/hello that returns { message: "hello world" }`
 5. Drag to **Review** column
-6. Run `npx tsx index.ts --once` and watch it score the ticket
+6. Run `ticket-to-pr --once` and watch it score the ticket
 7. Check Notion — ticket should be in **Scored** with Ease, Confidence, Spec, Impact filled in
-8. Drag to **Execute**, run `npx tsx index.ts --once` again
+8. Drag to **Execute**, run `ticket-to-pr --once` again
 9. Check Notion — ticket should be in **PR Ready** with Branch, Cost, and PR link
 
 Typical cost for this test: **~$0.49** ($0.22 review + $0.27 execute).
@@ -335,12 +335,10 @@ cat > ~/Library/LaunchAgents/com.ticket-to-pr.plist << 'EOF'
     <string>com.ticket-to-pr</string>
     <key>ProgramArguments</key>
     <array>
-        <string>npx</string>
-        <string>tsx</string>
-        <string>index.ts</string>
+        <string>ticket-to-pr</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Users/YOUR_USERNAME/Projects/ticket-to-pr</string>
+    <string>/Users/YOUR_USERNAME</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
@@ -505,7 +503,7 @@ ticket-to-pr/
 
 ## Adding a New Project
 
-Add to `projects.json` (or re-run `npx tsx index.ts init`):
+Add to `projects.json` (or re-run `ticket-to-pr init`):
 
 ```json
 {
@@ -522,7 +520,7 @@ Add to `projects.json` (or re-run `npx tsx index.ts init`):
 2. The directory must be a git repo with an `origin` remote
 3. If the project has a `CLAUDE.md`, both agents will read it for context
 4. Create Notion tickets with `Project` set to the exact key name (case-sensitive)
-5. Run `npx tsx index.ts doctor` to verify — it will check the schema and project match
+5. Run `ticket-to-pr doctor` to verify — it will check the schema and project match
 
 ## Error Handling
 
@@ -625,6 +623,8 @@ Add to `projects.json` (or re-run `npx tsx index.ts init`):
 ## Contributing
 
 Contributions are welcome! Please open an issue first to discuss what you'd like to change.
+
+> **End users** should install via `npm install -g ticket-to-pr`. The instructions below are for contributors.
 
 ```bash
 git clone https://github.com/JohnRiceML/ticket-to-pr.git
