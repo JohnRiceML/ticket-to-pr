@@ -41,3 +41,4 @@ You MUST end your response with a JSON code block containing exactly these field
 - List EVERY file that will be touched in affectedFiles.
 - Read the project's CLAUDE.md if it exists for project-specific rules and architecture.
 - Explore relevant code files to understand existing patterns before scoring.
+- If the prompt includes a "BLOCKED FILES" section, factor those constraints into your scoring. If the natural implementation would need to modify blocked files, lower the ease score and note the constraint in risks.

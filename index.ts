@@ -72,7 +72,9 @@ async function runReviewAgent(ticket: TicketDetails): Promise<void> {
   log(CYAN, 'REVIEW', `Starting review for "${ticket.title}" in ${ticket.project}`);
   const startTime = Date.now();
 
-  const prompt = [
+  const blockedFiles = getBlockedFiles(ticket.project);
+
+  const promptParts = [
     reviewPrompt,
     '',
     '## Ticket',
@@ -83,7 +85,19 @@ async function runReviewAgent(ticket: TicketDetails): Promise<void> {
     '',
     '**Page Content**:',
     ticket.bodyBlocks,
-  ].join('\n');
+  ];
+
+  if (blockedFiles.length > 0) {
+    promptParts.push(
+      '',
+      '## BLOCKED FILES — CANNOT BE MODIFIED',
+      'The following file patterns are off-limits. Factor this into your scoring — if the natural implementation would touch these files, lower the ease and confidence scores and note it in risks.',
+      '',
+      ...blockedFiles.map(p => `- \`${p}\``),
+    );
+  }
+
+  const prompt = promptParts.join('\n');
 
   const messages = query({
     prompt,

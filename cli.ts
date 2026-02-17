@@ -1,6 +1,6 @@
 import { createInterface, type Interface } from 'node:readline';
 import { execSync } from 'node:child_process';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { mask, shellEscape, writeEnvFile, updateProjectsFile, getDefaultBranch } from './lib/utils.js';
 import { getProjectNames, getProjectDir, getBaseBranch, getBlockedFiles, getSkipPR } from './lib/projects.js';
@@ -30,6 +30,196 @@ function checkCommand(cmd: string): { ok: boolean; output: string } {
   } catch {
     return { ok: false, output: '' };
   }
+}
+
+function detectBuildCommand(dir: string): string | undefined {
+  // Node.js — check package.json for build/test scripts
+  const pkgPath = join(dir, 'package.json');
+  if (existsSync(pkgPath)) {
+    try {
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+      if (pkg.scripts?.build) return 'npm run build';
+      if (pkg.scripts?.test) return 'npm test';
+    } catch { /* ignore parse errors */ }
+  }
+  // Rust
+  if (existsSync(join(dir, 'Cargo.toml'))) return 'cargo build';
+  // Go
+  if (existsSync(join(dir, 'go.mod'))) return 'go build ./...';
+  // Python
+  if (existsSync(join(dir, 'pyproject.toml'))) return 'python -m pytest';
+  // Makefile
+  if (existsSync(join(dir, 'Makefile'))) return 'make';
+  return undefined;
+}
+
+interface ProjectStack {
+  language: string;
+  framework?: string;
+  packageManager?: string;
+  testRunner?: string;
+  buildTool?: string;
+  css?: string;
+  orm?: string;
+}
+
+function detectProjectStack(dir: string): ProjectStack {
+  const stack: ProjectStack = { language: 'JavaScript' };
+
+  // TypeScript detection
+  if (existsSync(join(dir, 'tsconfig.json'))) {
+    stack.language = 'TypeScript';
+  }
+
+  // Rust / Go / Python detection (override language)
+  if (existsSync(join(dir, 'Cargo.toml'))) {
+    stack.language = 'Rust';
+    stack.buildTool = 'cargo';
+    stack.testRunner = 'cargo test';
+    return stack;
+  }
+  if (existsSync(join(dir, 'go.mod'))) {
+    stack.language = 'Go';
+    stack.buildTool = 'go';
+    stack.testRunner = 'go test';
+    return stack;
+  }
+  if (existsSync(join(dir, 'pyproject.toml'))) {
+    stack.language = 'Python';
+    stack.testRunner = 'pytest';
+    return stack;
+  }
+
+  // Node.js ecosystem — read package.json for framework/tools
+  const pkgPath = join(dir, 'package.json');
+  if (existsSync(pkgPath)) {
+    try {
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+      const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+
+      // Framework
+      if (allDeps['next']) stack.framework = 'Next.js';
+      else if (allDeps['nuxt']) stack.framework = 'Nuxt';
+      else if (allDeps['@remix-run/node'] || allDeps['@remix-run/react']) stack.framework = 'Remix';
+      else if (allDeps['express']) stack.framework = 'Express';
+      else if (allDeps['fastify']) stack.framework = 'Fastify';
+      else if (allDeps['react']) stack.framework = 'React';
+      else if (allDeps['vue']) stack.framework = 'Vue';
+      else if (allDeps['svelte']) stack.framework = 'Svelte';
+
+      // Test runner
+      if (allDeps['vitest']) stack.testRunner = 'vitest';
+      else if (allDeps['jest']) stack.testRunner = 'jest';
+      else if (allDeps['mocha']) stack.testRunner = 'mocha';
+
+      // Build tool
+      if (allDeps['vite'] && !stack.framework?.includes('Next')) stack.buildTool = 'vite';
+      else if (allDeps['webpack']) stack.buildTool = 'webpack';
+      else if (allDeps['esbuild']) stack.buildTool = 'esbuild';
+      else if (stack.language === 'TypeScript') stack.buildTool = 'tsc';
+
+      // CSS
+      if (allDeps['tailwindcss']) stack.css = 'Tailwind CSS';
+
+      // ORM
+      if (allDeps['prisma'] || allDeps['@prisma/client']) stack.orm = 'Prisma';
+      else if (allDeps['drizzle-orm']) stack.orm = 'Drizzle';
+    } catch { /* ignore parse errors */ }
+  }
+
+  // Package manager
+  if (existsSync(join(dir, 'bun.lockb'))) stack.packageManager = 'bun';
+  else if (existsSync(join(dir, 'pnpm-lock.yaml'))) stack.packageManager = 'pnpm';
+  else if (existsSync(join(dir, 'yarn.lock'))) stack.packageManager = 'yarn';
+  else if (existsSync(join(dir, 'package-lock.json'))) stack.packageManager = 'npm';
+
+  return stack;
+}
+
+function generateClaudeMd(name: string, stack: ProjectStack, buildCmd?: string): string {
+  const parts: string[] = [];
+
+  // Header
+  parts.push(`# ${name}\n`);
+
+  // Project overview
+  const stackDesc = [stack.language, stack.framework, stack.css, stack.orm].filter(Boolean).join(', ');
+  parts.push(`## Project overview`);
+  parts.push(`${stackDesc || stack.language} project.\n`);
+
+  // Build & test
+  parts.push(`## Build & test`);
+  if (buildCmd) parts.push(`- Build: \`${buildCmd}\``);
+  if (stack.testRunner) {
+    const testCmd = stack.testRunner === 'vitest' ? 'npx vitest run'
+      : stack.testRunner === 'jest' ? 'npx jest'
+      : stack.testRunner === 'pytest' ? 'python -m pytest'
+      : stack.testRunner === 'cargo test' ? 'cargo test'
+      : stack.testRunner === 'go test' ? 'go test ./...'
+      : stack.testRunner;
+    parts.push(`- Test: \`${testCmd}\``);
+  }
+  const pm = stack.packageManager || 'npm';
+  if (['TypeScript', 'JavaScript'].includes(stack.language)) {
+    parts.push(`- Lint: \`${pm === 'npm' ? 'npm run' : pm} lint\``);
+  }
+  if (stack.language === 'TypeScript') {
+    parts.push(`- Type check: \`npx tsc --noEmit\``);
+  }
+  parts.push('');
+
+  // Code style
+  parts.push(`## Code style`);
+  if (stack.framework === 'Next.js') {
+    parts.push(`- Use functional components with ${stack.language}`);
+    parts.push(`- Prefer server components; add "use client" only when needed`);
+  } else if (stack.framework === 'React') {
+    parts.push(`- Use functional components with hooks`);
+  } else if (stack.language === 'Rust') {
+    parts.push(`- Follow standard Rust conventions (rustfmt, clippy)`);
+  } else if (stack.language === 'Go') {
+    parts.push(`- Follow standard Go conventions (gofmt, go vet)`);
+  } else if (stack.language === 'Python') {
+    parts.push(`- Follow PEP 8 conventions`);
+  }
+  if (stack.css === 'Tailwind CSS') {
+    parts.push(`- Use Tailwind CSS utility classes for styling`);
+  }
+  if (stack.orm === 'Prisma') {
+    parts.push(`- Use Prisma for database access`);
+  } else if (stack.orm === 'Drizzle') {
+    parts.push(`- Use Drizzle ORM for database access`);
+  }
+  parts.push('');
+
+  // File structure
+  parts.push(`## File structure`);
+  if (stack.framework === 'Next.js') {
+    parts.push(`- app/ — routes and layouts`);
+    parts.push(`- components/ — React components`);
+    parts.push(`- lib/ — utilities and shared logic`);
+    if (stack.orm === 'Prisma') parts.push(`- prisma/ — database schema`);
+  } else if (stack.framework === 'Express' || stack.framework === 'Fastify') {
+    parts.push(`- src/ — application source`);
+    parts.push(`- routes/ — API routes`);
+    parts.push(`- lib/ — utilities and shared logic`);
+  } else if (stack.language === 'Rust') {
+    parts.push(`- src/ — application source`);
+    parts.push(`- tests/ — integration tests`);
+  } else if (stack.language === 'Go') {
+    parts.push(`- cmd/ — entrypoints`);
+    parts.push(`- internal/ — private packages`);
+    parts.push(`- pkg/ — public packages`);
+  } else if (stack.language === 'Python') {
+    parts.push(`- src/ — application source`);
+    parts.push(`- tests/ — test files`);
+  } else {
+    parts.push(`- src/ — application source`);
+    parts.push(`- lib/ — utilities and shared logic`);
+  }
+  parts.push('');
+
+  return parts.join('\n');
 }
 
 function ask(
@@ -521,7 +711,10 @@ export async function runInit(): Promise<void> {
         printStatus(null, 'Not a git repo', `${dir} — you can init git later`);
       }
 
-      const buildCmd = await ask(rl, 'Build command (optional)');
+      const detectedBuild = detectBuildCommand(dir);
+      const buildCmd = await ask(rl, 'Build command' + (detectedBuild ? '' : ' (optional)'), {
+        defaultValue: detectedBuild,
+      });
 
       // Detect default branch for this project
       const gitExists2 = existsSync(join(dir, '.git'));
@@ -539,6 +732,23 @@ export async function runInit(): Promise<void> {
       const skipPR = skipPRInput.toLowerCase() === 'y' || skipPRInput.toLowerCase() === 'yes' ? true : undefined;
 
       projects.push({ name, dir, buildCmd: buildCmd || undefined, baseBranch, blockedFiles, skipPR });
+
+      // Offer to generate CLAUDE.md if it doesn't exist
+      const claudeMdPath = join(dir, 'CLAUDE.md');
+      if (!existsSync(claudeMdPath)) {
+        const stack = detectProjectStack(dir);
+        console.log(`  ${DIM}Detected: ${[stack.language, stack.framework, stack.css, stack.orm].filter(Boolean).join(', ')}${RESET}`);
+        const genClaudeMd = await ask(rl, 'Generate starter CLAUDE.md?', { defaultValue: 'Y' });
+        if (genClaudeMd.toLowerCase() === 'y' || genClaudeMd.toLowerCase() === 'yes') {
+          const content = generateClaudeMd(name, stack, buildCmd || undefined);
+          writeFileSync(claudeMdPath, content, 'utf-8');
+          printStatus(true, 'Generated CLAUDE.md', claudeMdPath);
+          console.log(`  ${DIM}Edit it to add project-specific rules and conventions.${RESET}`);
+        }
+      } else {
+        printStatus(true, 'CLAUDE.md exists', claudeMdPath);
+      }
+
       console.log('');
 
       const another = await ask(rl, 'Add another project?', { defaultValue: 'N' });

@@ -439,7 +439,7 @@ Replace `YOUR_USERNAME` and update the PATH to include your Node.js bin director
 
 | Command / Flag | Behavior |
 |----------------|----------|
-| `init` | Guided setup — validates Notion credentials live, configures projects, writes `.env.local` and `projects.json`. Detects existing config on re-run. |
+| `init` | Guided setup — validates Notion credentials live, auto-detects build commands, generates starter `CLAUDE.md`, configures projects, writes `.env.local` and `projects.json`. Detects existing config on re-run. |
 | `doctor` | Diagnostic check — verifies environment, Notion connectivity, database schema (10 required properties), tools, and projects |
 | (none) | Continuous polling every 30s |
 | `--once` | Poll once, wait for agents to finish, exit |
@@ -453,6 +453,7 @@ Replace `YOUR_USERNAME` and update the PATH to include your Node.js bin director
 - Model: Sonnet 4.5 (configurable via `REVIEW_MODEL` in config.ts)
 - Tools: Read, Glob, Grep, Task
 - Loads the target project's `CLAUDE.md` for architecture context
+- If `blockedFiles` are configured, factors those constraints into scoring (lowers ease/confidence if natural implementation would touch blocked files)
 - Explores the codebase, then scores the ticket
 - Uses structured output (`json_schema`) to guarantee valid JSON response
 - Outputs: easeScore, confidenceScore, spec, impactReport, affectedFiles, risks
@@ -541,16 +542,16 @@ ticket-to-pr/
 
 ## Adding a New Project
 
-1. Add to `projects.json`:
+1. Add to `projects.json` (or re-run `ticket-to-pr init` which auto-detects build commands):
    ```json
    "MyProject": {
      "directory": "/absolute/path/to/project",
      "buildCommand": "npm run build"
    }
    ```
-2. `buildCommand` is optional — omit it if you don't need build validation
+2. `buildCommand` is optional — omit it if you don't need build validation. `init` auto-detects from `package.json`, `Cargo.toml`, `go.mod`, `pyproject.toml`, or `Makefile`.
 3. Make sure the directory is a git repo with an `origin` remote
-4. If the project has a `CLAUDE.md`, both agents will read it for context
+4. If the project has a `CLAUDE.md`, both agents will read it for context. Run `ticket-to-pr init` to generate a starter one based on detected project stack.
 5. Create Notion tickets with `Project` set to `"MyProject"`
 
 No other code changes needed.
@@ -626,3 +627,4 @@ First end-to-end test (hello world endpoint): **$0.49 total** ($0.22 review + $0
 - Auto-retry failed tickets with exponential backoff
 - Cost tracking dashboard aggregated per project/week
 - Linux systemd service support
+- Web UI for viewing agent logs and ticket status

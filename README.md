@@ -34,7 +34,7 @@ TicketToPR clears that pile. Toss tickets on your Notion board, drag to Review, 
 - **AI scores before AI codes** — every ticket gets an ease/confidence rating and implementation spec before a single line is written. You always decide go/no-go.
 - **Your codebase, your rules** — Claude reads your project's `CLAUDE.md` and follows your conventions, patterns, and constraints.
 - **Build validation** — code must pass your build command before anything pushes. No broken PRs.
-- **Blocked file guardrails** — configure glob patterns for files the agent must never touch (e.g. migrations, DB schemas). Enforced via prompt + hard post-diff validation.
+- **Blocked file guardrails** — configure glob patterns for files the agent must never touch (e.g. migrations, DB schemas). Enforced via prompt injection into both review and execute agents + hard post-diff validation.
 - **Full audit trail** — cost, duration, scores, branch name, PR link, and agent comments posted directly on the Notion ticket.
 - **Cost transparency** — every ticket shows exactly what it cost. Simple tasks run $0.35-0.55.
 - **Human-in-the-loop** — nothing merges without a developer reviewing the PR.
@@ -210,7 +210,7 @@ ticket-to-pr --dry-run --once
 
 | Command / Flag | Behavior |
 |----------------|----------|
-| `init` | Guided setup — validates Notion credentials live, configures projects, writes `.env.local` and `projects.json`. Detects existing config on re-run. |
+| `init` | Guided setup — validates Notion credentials live, auto-detects build commands, generates starter `CLAUDE.md`, configures projects, writes `.env.local` and `projects.json`. Detects existing config on re-run. |
 | `doctor` | Diagnostic check — verifies environment, Notion connectivity, database schema, tools, and projects |
 | *(none)* | Continuous polling every 30s |
 | `--once` | Poll once, wait for agents to finish, exit |
@@ -247,11 +247,15 @@ Step 4: Projects
   Project name: MyApp
   Directory: /Users/you/Projects/MyApp
   ✓ Git repo  git@github.com:you/MyApp.git
-  Build command (optional): npm run build
+  Build command (npm run build):                    ← auto-detected from package.json
   Base branch (main):
   Glob patterns the agent must never touch (e.g. **/migrations/**, prisma/schema.prisma, **/*.sql)
   Blocked file patterns (optional, comma-separated):
   Skip automatic PR creation? (N):
+  Detected: TypeScript, Next.js, Tailwind CSS       ← auto-detected from project files
+  Generate starter CLAUDE.md? (Y):
+  ✓ Generated CLAUDE.md  /Users/you/Projects/MyApp/CLAUDE.md
+  Edit it to add project-specific rules and conventions.
 
   Add another project? (N):
 
@@ -265,6 +269,8 @@ Ready!
 ```
 
 - **Blocks on bad config** — invalid Notion tokens and database IDs are rejected and re-prompted (won't save broken credentials)
+- **Auto-detects build command** — reads `package.json`, `Cargo.toml`, `go.mod`, `pyproject.toml`, or `Makefile` and pre-fills the build command. Press Enter to accept or override.
+- **Generates starter CLAUDE.md** — detects your project stack (language, framework, test runner, CSS, ORM) and offers to generate a `CLAUDE.md` with build commands, code style, and file structure. Both agents read this file for context.
 - **Re-run safe** — detects existing `.env.local` and `projects.json`, asks "update" or "start fresh"
 - **Free tier guard** — warns if you configure multiple projects without a Pro license
 - Masks existing secrets when showing defaults
@@ -386,7 +392,7 @@ tail -f ~/Projects/ticket-to-pr/bridge.log
 The review agent explores your codebase without modifying anything:
 
 - **Tools**: Read, Glob, Grep, Task
-- **Context**: Reads your project's `CLAUDE.md` for architecture rules
+- **Context**: Reads your project's `CLAUDE.md` for architecture rules. If `blockedFiles` are configured, the review agent factors those constraints into scoring.
 - **Output**: Ease score, confidence score, implementation spec, impact report, affected files, risks
 - **Budget**: $2.00 max, 25 turns max
 - **Typical cost**: $0.15 - $0.50
@@ -533,7 +539,7 @@ Add to `projects.json` (or re-run `ticket-to-pr init`):
 
 1. All fields except `directory` are optional — omit any you don't need
 2. `baseBranch` — which branch to base feature branches on. Auto-detected (`main`/`master`) if omitted.
-3. `blockedFiles` — glob patterns the agent must never touch. Enforced both via prompt injection and a hard post-diff validation before push.
+3. `blockedFiles` — glob patterns the agent must never touch. Enforced via prompt injection into both review and execute agents, plus a hard post-diff validation before push.
 4. `skipPR` — set `true` to push branches without creating a PR (useful for repos that use a different PR workflow)
 5. The directory must be a git repo with an `origin` remote
 6. If the project has a `CLAUDE.md`, both agents will read it for context
@@ -629,7 +635,7 @@ Add to `projects.json` (or re-run `ticket-to-pr init`):
 - **Read-only review** — the review agent cannot modify files. It only reads and analyzes.
 - **Sandboxed execution** — the execute agent has no access to the web, cannot push code, and cannot run destructive commands. TicketToPR handles git operations separately.
 - **Build gate** — code must pass your build validation before anything is pushed.
-- **Blocked file gate** — if `blockedFiles` patterns are configured, a post-diff check runs before push. Any violations abort the run — no code reaches origin.
+- **Blocked file gate** — if `blockedFiles` patterns are configured, they're injected into both the review and execute agent prompts. A hard post-diff check also runs before push. Any violations abort the run — no code reaches origin.
 - **Human gate** — pull requests require your review and approval before merging.
 
 ## Tech Stack
