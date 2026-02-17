@@ -10,6 +10,8 @@ interface ProjectEntry {
   baseBranch?: string;
   blockedFiles?: string[];
   skipPR?: boolean;
+  devAccess?: boolean;
+  envFile?: string;
 }
 
 interface ProjectsFile {
@@ -51,6 +53,14 @@ export function getBlockedFiles(name: string): string[] {
 
 export function getSkipPR(name: string): boolean {
   return load().projects[name]?.skipPR ?? false;
+}
+
+export function getDevAccess(name: string): boolean {
+  return load().projects[name]?.devAccess ?? false;
+}
+
+export function getEnvFile(name: string): string | undefined {
+  return load().projects[name]?.envFile;
 }
 
 export function getAllProjects(): Record<string, string> {

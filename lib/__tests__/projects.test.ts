@@ -161,6 +161,114 @@ describe('projects module', () => {
     expect(getBuildCommand('App')).toBeUndefined();
   });
 
+  it('getDevAccess returns true when set', async () => {
+    writeFileSync(
+      projectsPath,
+      JSON.stringify({
+        projects: { App: { directory: '/app', devAccess: true } },
+      }),
+    );
+
+    vi.doMock('node:fs', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('node:fs')>();
+      return {
+        ...actual,
+        readFileSync: (path: string, encoding: string) => {
+          if (typeof path === 'string' && path.includes('projects.json')) {
+            return actual.readFileSync(projectsPath, encoding);
+          }
+          return actual.readFileSync(path, encoding);
+        },
+      };
+    });
+
+    const { getDevAccess, _resetCache } = await import('../projects.js');
+    _resetCache();
+
+    expect(getDevAccess('App')).toBe(true);
+  });
+
+  it('getDevAccess defaults to false when not set', async () => {
+    writeFileSync(
+      projectsPath,
+      JSON.stringify({
+        projects: { App: { directory: '/app' } },
+      }),
+    );
+
+    vi.doMock('node:fs', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('node:fs')>();
+      return {
+        ...actual,
+        readFileSync: (path: string, encoding: string) => {
+          if (typeof path === 'string' && path.includes('projects.json')) {
+            return actual.readFileSync(projectsPath, encoding);
+          }
+          return actual.readFileSync(path, encoding);
+        },
+      };
+    });
+
+    const { getDevAccess, _resetCache } = await import('../projects.js');
+    _resetCache();
+
+    expect(getDevAccess('App')).toBe(false);
+  });
+
+  it('getEnvFile returns envFile when set', async () => {
+    writeFileSync(
+      projectsPath,
+      JSON.stringify({
+        projects: { App: { directory: '/app', envFile: '.env.local' } },
+      }),
+    );
+
+    vi.doMock('node:fs', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('node:fs')>();
+      return {
+        ...actual,
+        readFileSync: (path: string, encoding: string) => {
+          if (typeof path === 'string' && path.includes('projects.json')) {
+            return actual.readFileSync(projectsPath, encoding);
+          }
+          return actual.readFileSync(path, encoding);
+        },
+      };
+    });
+
+    const { getEnvFile, _resetCache } = await import('../projects.js');
+    _resetCache();
+
+    expect(getEnvFile('App')).toBe('.env.local');
+  });
+
+  it('getEnvFile returns undefined when not set', async () => {
+    writeFileSync(
+      projectsPath,
+      JSON.stringify({
+        projects: { App: { directory: '/app' } },
+      }),
+    );
+
+    vi.doMock('node:fs', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('node:fs')>();
+      return {
+        ...actual,
+        readFileSync: (path: string, encoding: string) => {
+          if (typeof path === 'string' && path.includes('projects.json')) {
+            return actual.readFileSync(projectsPath, encoding);
+          }
+          return actual.readFileSync(path, encoding);
+        },
+      };
+    });
+
+    const { getEnvFile, _resetCache } = await import('../projects.js');
+    _resetCache();
+
+    expect(getEnvFile('App')).toBeUndefined();
+  });
+
   it('handles missing projects.json gracefully', async () => {
     vi.doMock('node:fs', async (importOriginal) => {
       const actual = await importOriginal<typeof import('node:fs')>();

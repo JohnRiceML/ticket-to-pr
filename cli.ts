@@ -682,7 +682,7 @@ export async function runInit(): Promise<void> {
     // Step 4: Projects
     console.log(`${BOLD}Step 4: Projects${RESET}`);
 
-    const projects: Array<{ name: string; dir: string; buildCmd?: string; baseBranch?: string; blockedFiles?: string[]; skipPR?: boolean }> = [];
+    const projects: Array<{ name: string; dir: string; buildCmd?: string; baseBranch?: string; blockedFiles?: string[]; skipPR?: boolean; devAccess?: boolean; envFile?: string }> = [];
 
     let addMore = true;
     while (addMore) {
@@ -731,7 +731,17 @@ export async function runInit(): Promise<void> {
       const skipPRInput = await ask(rl, 'Skip automatic PR creation?', { defaultValue: 'N' });
       const skipPR = skipPRInput.toLowerCase() === 'y' || skipPRInput.toLowerCase() === 'yes' ? true : undefined;
 
-      projects.push({ name, dir, buildCmd: buildCmd || undefined, baseBranch, blockedFiles, skipPR });
+      const devAccessInput = await ask(rl, 'Enable dev access (run scripts, query DB, hit endpoints)?', { defaultValue: 'N' });
+      const devAccessEnabled = devAccessInput.toLowerCase() === 'y' || devAccessInput.toLowerCase() === 'yes';
+
+      let envFile: string | undefined;
+      if (devAccessEnabled) {
+        const envCandidates = ['.env.local', '.env.development', '.env'];
+        const detected = envCandidates.find(f => existsSync(join(dir, f)));
+        envFile = await ask(rl, 'Env file to load', { defaultValue: detected }) || undefined;
+      }
+
+      projects.push({ name, dir, buildCmd: buildCmd || undefined, baseBranch, blockedFiles, skipPR, devAccess: devAccessEnabled || undefined, envFile });
 
       // Offer to generate CLAUDE.md if it doesn't exist
       const claudeMdPath = join(dir, 'CLAUDE.md');

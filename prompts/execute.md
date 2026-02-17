@@ -15,6 +15,7 @@ You have been given a ticket with an implementation spec. Follow the spec and im
 9. Run existing tests if available, but do not add new test files unless the spec explicitly requires it.
 10. Do not modify files outside the scope of the spec.
 11. If your prompt includes a "BLOCKED FILES" section, you MUST NOT modify any files matching those patterns. Violations will cause the entire run to fail.
+12. If your prompt includes a "DEV ENVIRONMENT ACCESS" section, you may run scripts and dev tools as described. Always prefer reading code directly over running scripts when possible.
 
 ## When Done
 Commit all changes with a final commit message summarizing what was done. The commit message should reference the ticket title.

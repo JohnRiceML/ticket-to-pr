@@ -8,6 +8,7 @@ import {
   extractJsonFromOutput,
   extractNumber,
   loadEnv,
+  parseEnvFile,
   mask,
   writeEnvFile,
   updateProjectsFile,
@@ -160,6 +161,50 @@ describe('loadEnv', () => {
     } finally {
       delete process.env.TEST_LOAD_EXISTING;
     }
+  });
+});
+
+// -- parseEnvFile --
+
+describe('parseEnvFile', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = join(tmpdir(), `utils-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(tmpDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns empty object for missing file', () => {
+    expect(parseEnvFile(join(tmpDir, 'nonexistent'))).toEqual({});
+  });
+
+  it('parses KEY=VALUE pairs', () => {
+    const envFile = join(tmpDir, '.env');
+    writeFileSync(envFile, 'FOO=bar\nBAZ=qux\n');
+    expect(parseEnvFile(envFile)).toEqual({ FOO: 'bar', BAZ: 'qux' });
+  });
+
+  it('skips comments and blank lines', () => {
+    const envFile = join(tmpDir, '.env');
+    writeFileSync(envFile, '# comment\n\nKEY=value\n');
+    expect(parseEnvFile(envFile)).toEqual({ KEY: 'value' });
+  });
+
+  it('handles values with equals signs', () => {
+    const envFile = join(tmpDir, '.env');
+    writeFileSync(envFile, 'URL=http://localhost:3000?foo=bar\n');
+    expect(parseEnvFile(envFile)).toEqual({ URL: 'http://localhost:3000?foo=bar' });
+  });
+
+  it('does not mutate process.env', () => {
+    const envFile = join(tmpDir, '.env');
+    writeFileSync(envFile, 'PARSE_ENV_TEST_KEY=should_not_leak\n');
+    parseEnvFile(envFile);
+    expect(process.env.PARSE_ENV_TEST_KEY).toBeUndefined();
   });
 });
 

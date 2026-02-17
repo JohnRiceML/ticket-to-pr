@@ -3,8 +3,8 @@ import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { CONFIG, REVIEW_OUTPUT_SCHEMA, isPro, type LockEntry, type TicketDetails, type ReviewOutput } from './config.js';
-import { sleep, clamp, extractJsonFromOutput, shellEscape, extractNumber, loadEnv, createWorktree, removeWorktree, getDefaultBranch, validateNoBlockedFiles } from './lib/utils.js';
-import { getProjectDir, getProjectNames, getBuildCommand, getBaseBranch, getBlockedFiles, getSkipPR } from './lib/projects.js';
+import { sleep, clamp, extractJsonFromOutput, shellEscape, extractNumber, loadEnv, parseEnvFile, createWorktree, removeWorktree, getDefaultBranch, validateNoBlockedFiles } from './lib/utils.js';
+import { getProjectDir, getProjectNames, getBuildCommand, getBaseBranch, getBlockedFiles, getSkipPR, getDevAccess, getEnvFile } from './lib/projects.js';
 import {
   fetchTicketsByStatus,
   fetchTicketDetails,
@@ -206,6 +206,8 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
   const baseBranch = getBaseBranch(ticket.project) || getDefaultBranch(projectDir);
   const blockedFiles = getBlockedFiles(ticket.project);
   const skipPR = getSkipPR(ticket.project);
+  const devAccess = getDevAccess(ticket.project);
+  const envFile = getEnvFile(ticket.project);
 
   log(MAGENTA, 'EXECUTE', `Starting execution for "${ticket.title}" on branch ${branchName}`);
   const startTime = Date.now();
@@ -249,19 +251,62 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
       );
     }
 
+    if (devAccess) {
+      promptParts.push(
+        '',
+        '## DEV ENVIRONMENT ACCESS',
+        'You have access to run scripts and dev tools in this project. Use this to:',
+        '- Write and run scripts to understand database schema or existing data',
+        '- Hit local API endpoints with curl to understand response shapes',
+        '- Run tests to verify your implementation',
+        '- Use ORM tools (e.g. `npx prisma studio`) to inspect the data model',
+        '',
+        '### Rules',
+        '- Do NOT run database migrations (`prisma migrate`, `db push`, `alembic`, etc.)',
+        '- Do NOT drop, truncate, or bulk-delete data',
+        '- Do NOT make requests to external/production hosts — only localhost and 127.0.0.1',
+        '- Clean up any temporary scripts you create before your final commit',
+        '- If you create test data, document it in a commit message so reviewers know',
+      );
+    }
+
     const prompt = promptParts.join('\n');
+
+    // Build agent environment when envFile is configured
+    let agentEnv: Record<string, string | undefined> | undefined;
+    if (envFile) {
+      const projectEnv = parseEnvFile(join(projectDir, envFile));
+      agentEnv = { ...process.env, ...projectEnv };
+    }
+
+    const baseTools = [
+      'Read', 'Glob', 'Grep', 'Edit', 'Write', 'Task',
+      'Bash(git add:*)', 'Bash(git commit:*)', 'Bash(git status:*)',
+      'Bash(git diff:*)', 'Bash(git log:*)',
+      'Bash(npm run build:*)', 'Bash(npm test:*)', 'Bash(npx tsc:*)',
+    ];
+
+    const devTools = [
+      'Bash(npx tsx:*)',
+      'Bash(node:*)',
+      'Bash(npm run:*)',
+      'Bash(npx vitest:*)',
+      'Bash(npx jest:*)',
+      'Bash(npx prisma:*)',
+      'Bash(python:*)',
+      'Bash(curl http://localhost:*)',
+      'Bash(curl http://127.0.0.1:*)',
+    ];
+
+    const allowedTools = devAccess ? [...baseTools, ...devTools] : baseTools;
 
     const messages = query({
       prompt,
       options: {
         model: CONFIG.EXECUTE_MODEL,
         cwd: worktreeDir,
-        allowedTools: [
-          'Read', 'Glob', 'Grep', 'Edit', 'Write', 'Task',
-          'Bash(git add:*)', 'Bash(git commit:*)', 'Bash(git status:*)',
-          'Bash(git diff:*)', 'Bash(git log:*)',
-          'Bash(npm run build:*)', 'Bash(npm test:*)', 'Bash(npx tsc:*)',
-        ],
+        allowedTools,
+        env: agentEnv,
         disallowedTools: ['WebFetch', 'WebSearch'],
         maxTurns: CONFIG.EXECUTE_MAX_TURNS,
         maxBudgetUsd: CONFIG.EXECUTE_BUDGET_USD,

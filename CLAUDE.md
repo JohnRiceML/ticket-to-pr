@@ -464,7 +464,8 @@ Replace `YOUR_USERNAME` and update the PATH to include your Node.js bin director
 
 - Model: Opus 4.6 (configurable via `EXECUTE_MODEL` in config.ts)
 - Tools: Read, Glob, Grep, Edit, Write + limited Bash (git, build, test only)
-- Cannot: push, run destructive commands, modify databases, access web
+- When `devAccess` is enabled: additionally allows `npx tsx`, `node`, `npm run`, `npx vitest`, `npx jest`, `npx prisma`, `python`, and `curl` to localhost/127.0.0.1 only
+- Cannot: push, run destructive commands, modify databases, access web, curl external hosts
 - Loads the target project's `CLAUDE.md` for project-specific rules
 - Bridge handles: branch creation, build validation, push, Notion updates
 - Budget: $15.00 max, 50 turns max
@@ -512,6 +513,8 @@ Project configuration in `projects.json`:
 | `projects.<name>.baseBranch` | Optional base branch (e.g. `develop`). Falls back to auto-detected default. |
 | `projects.<name>.blockedFiles` | Optional array of glob patterns the agent must never touch |
 | `projects.<name>.skipPR` | Optional boolean. Set `true` to push branch but skip PR creation. |
+| `projects.<name>.devAccess` | Optional boolean. Set `true` to let the execute agent run scripts, query DBs, and hit local endpoints. |
+| `projects.<name>.envFile` | Optional env file path relative to project directory (e.g. `.env.local`). Loaded into the agent's environment when set. |
 
 ## File Structure
 

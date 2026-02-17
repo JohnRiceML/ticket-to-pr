@@ -418,7 +418,8 @@ The review agent explores your codebase without modifying anything:
 The execute agent implements the code based on the spec:
 
 - **Tools**: Read, Glob, Grep, Edit, Write + limited Bash (git, build, test only)
-- **Cannot**: push, run destructive commands, modify databases, access the web
+- **Dev access** (opt-in): When `devAccess` is enabled, additionally allows `npx tsx`, `node`, `npm run`, `npx vitest`, `npx jest`, `npx prisma`, `python`, and `curl` to localhost/127.0.0.1 only
+- **Cannot**: push, run destructive commands, modify databases, access the web, curl external hosts
 - **Context**: Reads your project's `CLAUDE.md` for conventions and rules
 - **Budget**: $15.00 max, 50 turns max
 - **Typical cost**: $0.20 - $2.00
@@ -496,6 +497,8 @@ Project configuration in `projects.json`:
 | `projects.<name>.baseBranch` | Optional base branch (e.g. `develop`). Falls back to auto-detected default (`main`/`master`). |
 | `projects.<name>.blockedFiles` | Optional array of glob patterns the agent must never touch (e.g. `["**/migrations/**", "**/*.sql"]`) |
 | `projects.<name>.skipPR` | Optional boolean. Set `true` to push the branch but skip automatic PR creation. |
+| `projects.<name>.devAccess` | Optional boolean. Set `true` to let the execute agent run scripts, query DBs, and hit local endpoints. |
+| `projects.<name>.envFile` | Optional env file path relative to project directory (e.g. `.env.local`). Loaded into the agent's environment when set. |
 
 ## Project Structure
 

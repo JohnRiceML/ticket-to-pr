@@ -70,6 +70,21 @@ export function extractNumber(ticket: { impact?: string }, field: string): strin
   return '?';
 }
 
+export function parseEnvFile(filepath: string): Record<string, string> {
+  const vars: Record<string, string> = {};
+  try {
+    const content = readFileSync(filepath, 'utf-8');
+    for (const line of content.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const eqIndex = trimmed.indexOf('=');
+      if (eqIndex === -1) continue;
+      vars[trimmed.slice(0, eqIndex).trim()] = trimmed.slice(eqIndex + 1).trim();
+    }
+  } catch { /* file doesn't exist */ }
+  return vars;
+}
+
 export function loadEnv(filepath: string): void {
   try {
     const content = readFileSync(filepath, 'utf-8');
@@ -129,9 +144,9 @@ export function writeEnvFile(filepath: string, updates: Record<string, string>):
 
 export function updateProjectsFile(
   filepath: string,
-  projects: Array<{ name: string; dir: string; buildCmd?: string; baseBranch?: string; blockedFiles?: string[]; skipPR?: boolean }>,
+  projects: Array<{ name: string; dir: string; buildCmd?: string; baseBranch?: string; blockedFiles?: string[]; skipPR?: boolean; devAccess?: boolean; envFile?: string }>,
 ): void {
-  let data: { projects: Record<string, { directory: string; buildCommand?: string; baseBranch?: string; blockedFiles?: string[]; skipPR?: boolean }> } = {
+  let data: { projects: Record<string, { directory: string; buildCommand?: string; baseBranch?: string; blockedFiles?: string[]; skipPR?: boolean; devAccess?: boolean; envFile?: string }> } = {
     projects: {},
   };
 
@@ -149,6 +164,8 @@ export function updateProjectsFile(
       ...(proj.baseBranch ? { baseBranch: proj.baseBranch } : {}),
       ...(proj.blockedFiles && proj.blockedFiles.length > 0 ? { blockedFiles: proj.blockedFiles } : {}),
       ...(proj.skipPR ? { skipPR: proj.skipPR } : {}),
+      ...(proj.devAccess ? { devAccess: proj.devAccess } : {}),
+      ...(proj.envFile ? { envFile: proj.envFile } : {}),
     };
   }
 
