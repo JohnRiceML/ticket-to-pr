@@ -129,9 +129,9 @@ export function writeEnvFile(filepath: string, updates: Record<string, string>):
 
 export function updateProjectsFile(
   filepath: string,
-  projects: Array<{ name: string; dir: string; buildCmd?: string }>,
+  projects: Array<{ name: string; dir: string; buildCmd?: string; baseBranch?: string; blockedFiles?: string[]; skipPR?: boolean }>,
 ): void {
-  let data: { projects: Record<string, { directory: string; buildCommand?: string }> } = {
+  let data: { projects: Record<string, { directory: string; buildCommand?: string; baseBranch?: string; blockedFiles?: string[]; skipPR?: boolean }> } = {
     projects: {},
   };
 
@@ -146,6 +146,9 @@ export function updateProjectsFile(
     data.projects[proj.name] = {
       directory: proj.dir,
       ...(proj.buildCmd ? { buildCommand: proj.buildCmd } : {}),
+      ...(proj.baseBranch ? { baseBranch: proj.baseBranch } : {}),
+      ...(proj.blockedFiles && proj.blockedFiles.length > 0 ? { blockedFiles: proj.blockedFiles } : {}),
+      ...(proj.skipPR ? { skipPR: proj.skipPR } : {}),
     };
   }
 
@@ -211,9 +214,19 @@ export function ensureWorktreesIgnored(projectDir: string): void {
   }
 }
 
-export function createWorktree(projectDir: string, branchName: string, worktreeDir: string): void {
+export function createWorktree(projectDir: string, branchName: string, worktreeDir: string, baseBranch?: string): void {
   mkdirSync(join(projectDir, '.worktrees'), { recursive: true });
   ensureWorktreesIgnored(projectDir);
+
+  // Fetch latest so new branch starts from up-to-date base
+  const base = baseBranch || 'main';
+  try {
+    execSync(`git fetch origin ${shellEscape(base)}`, {
+      cwd: projectDir, stdio: 'pipe', timeout: 30_000,
+    });
+  } catch {
+    // Best effort — offline/no remote continues with local state
+  }
 
   // Clean up stale worktree if it exists from a crashed run
   if (existsSync(worktreeDir)) {
@@ -228,9 +241,9 @@ export function createWorktree(projectDir: string, branchName: string, worktreeD
     }
   }
 
-  // Try creating with a new branch first
+  // Try creating with a new branch based on origin/<baseBranch>
   try {
-    execSync(`git worktree add ${shellEscape(worktreeDir)} -b ${shellEscape(branchName)}`, {
+    execSync(`git worktree add ${shellEscape(worktreeDir)} -b ${shellEscape(branchName)} origin/${shellEscape(base)}`, {
       cwd: projectDir,
       stdio: 'pipe',
     });
@@ -245,6 +258,79 @@ export function createWorktree(projectDir: string, branchName: string, worktreeD
       throw new Error(`Failed to create worktree for branch ${branchName}: ${e}`);
     }
   }
+}
+
+// -- Blocked file validation --
+
+/** Convert a simple glob pattern to a regex. Supports **, *, and ? wildcards. */
+function globToRegex(pattern: string): RegExp {
+  let regex = '';
+  let i = 0;
+  while (i < pattern.length) {
+    const ch = pattern[i];
+    if (ch === '*' && pattern[i + 1] === '*') {
+      // ** matches any path segments
+      regex += '.*';
+      i += 2;
+      // skip trailing slash after **
+      if (pattern[i] === '/') i++;
+    } else if (ch === '*') {
+      // * matches anything except /
+      regex += '[^/]*';
+      i++;
+    } else if (ch === '?') {
+      regex += '[^/]';
+      i++;
+    } else if ('.+^${}()|[]\\'.includes(ch)) {
+      regex += '\\' + ch;
+      i++;
+    } else {
+      regex += ch;
+      i++;
+    }
+  }
+  return new RegExp(`^${regex}$`);
+}
+
+export function validateNoBlockedFiles(
+  worktreeDir: string,
+  baseBranch: string,
+  blockedPatterns: string[],
+): string[] {
+  if (blockedPatterns.length === 0) return [];
+
+  let changedFiles: string[];
+  try {
+    const output = execSync(
+      `git diff --name-only origin/${shellEscape(baseBranch)}...HEAD`,
+      { cwd: worktreeDir, stdio: 'pipe' },
+    ).toString().trim();
+    changedFiles = output ? output.split('\n') : [];
+  } catch {
+    // Fallback: diff against HEAD~1 or empty if no commits
+    try {
+      const output = execSync('git diff --name-only HEAD~1...HEAD', {
+        cwd: worktreeDir, stdio: 'pipe',
+      }).toString().trim();
+      changedFiles = output ? output.split('\n') : [];
+    } catch {
+      return []; // No commits to validate
+    }
+  }
+
+  const regexes = blockedPatterns.map(globToRegex);
+  const violations: string[] = [];
+
+  for (const file of changedFiles) {
+    for (let i = 0; i < regexes.length; i++) {
+      if (regexes[i].test(file)) {
+        violations.push(`${file} (matched pattern: ${blockedPatterns[i]})`);
+        break;
+      }
+    }
+  }
+
+  return violations;
 }
 
 export function removeWorktree(projectDir: string, worktreeDir: string): void {

@@ -1,13 +1,15 @@
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
+import { CONFIG_DIR } from './paths.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const PROJECTS_PATH = join(__dirname, '..', 'projects.json');
+const PROJECTS_PATH = join(CONFIG_DIR, 'projects.json');
 
 interface ProjectEntry {
   directory: string;
   buildCommand?: string;
+  baseBranch?: string;
+  blockedFiles?: string[];
+  skipPR?: boolean;
 }
 
 interface ProjectsFile {
@@ -37,6 +39,18 @@ export function getProjectNames(): string[] {
 
 export function getBuildCommand(name: string): string | undefined {
   return load().projects[name]?.buildCommand;
+}
+
+export function getBaseBranch(name: string): string | undefined {
+  return load().projects[name]?.baseBranch;
+}
+
+export function getBlockedFiles(name: string): string[] {
+  return load().projects[name]?.blockedFiles ?? [];
+}
+
+export function getSkipPR(name: string): boolean {
+  return load().projects[name]?.skipPR ?? false;
 }
 
 export function getAllProjects(): Record<string, string> {

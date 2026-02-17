@@ -1,13 +1,11 @@
 import { createInterface, type Interface } from 'node:readline';
 import { execSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
-import { mask, shellEscape, writeEnvFile, updateProjectsFile } from './lib/utils.js';
-import { getProjectNames, getProjectDir } from './lib/projects.js';
+import { join } from 'node:path';
+import { mask, shellEscape, writeEnvFile, updateProjectsFile, getDefaultBranch } from './lib/utils.js';
+import { getProjectNames, getProjectDir, getBaseBranch, getBlockedFiles, getSkipPR } from './lib/projects.js';
+import { CONFIG_DIR } from './lib/paths.js';
 import type { Client as NotionClient } from '@notionhq/client';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // -- Colors --
 const RESET = '\x1b[0m';
@@ -74,7 +72,7 @@ export async function runDoctor(): Promise<void> {
   // Environment
   console.log(`${BOLD}Environment:${RESET}`);
 
-  const envPath = join(__dirname, '.env.local');
+  const envPath = join(CONFIG_DIR, '.env.local');
   const envExists = existsSync(envPath);
   printStatus(envExists, '.env.local exists');
   track(envExists);
@@ -299,6 +297,22 @@ export async function runDoctor(): Promise<void> {
 
       printStatus(true, `${name}`, `${dir}`);
       track(true);
+
+      // Display guardrail config
+      const configuredBase = getBaseBranch(name);
+      const detectedBase = getDefaultBranch(dir);
+      const baseDisplay = configuredBase
+        ? `${configuredBase}${configuredBase !== detectedBase ? ` (auto-detected: ${detectedBase})` : ''}`
+        : `${detectedBase} (auto-detected)`;
+      printStatus(null, `  Base branch`, baseDisplay);
+
+      const blocked = getBlockedFiles(name);
+      printStatus(null, `  Blocked files`, blocked.length > 0 ? blocked.join(', ') : 'none configured');
+
+      const skip = getSkipPR(name);
+      if (skip) {
+        printStatus(null, `  Skip PR`, 'enabled');
+      }
     }
   }
 
@@ -316,8 +330,8 @@ export async function runInit(): Promise<void> {
 
   const rl = createInterface({ input: process.stdin, output: process.stdout });
 
-  const envPath = join(__dirname, '.env.local');
-  const projectsPath = join(__dirname, 'projects.json');
+  const envPath = join(CONFIG_DIR, '.env.local');
+  const projectsPath = join(CONFIG_DIR, 'projects.json');
 
   // Load existing env values for defaults
   let existingEnv: Record<string, string> = {};
@@ -478,7 +492,7 @@ export async function runInit(): Promise<void> {
     // Step 4: Projects
     console.log(`${BOLD}Step 4: Projects${RESET}`);
 
-    const projects: Array<{ name: string; dir: string; buildCmd?: string }> = [];
+    const projects: Array<{ name: string; dir: string; buildCmd?: string; baseBranch?: string; blockedFiles?: string[]; skipPR?: boolean }> = [];
 
     let addMore = true;
     while (addMore) {
@@ -509,7 +523,22 @@ export async function runInit(): Promise<void> {
 
       const buildCmd = await ask(rl, 'Build command (optional)');
 
-      projects.push({ name, dir, buildCmd: buildCmd || undefined });
+      // Detect default branch for this project
+      const gitExists2 = existsSync(join(dir, '.git'));
+      const detectedBranch = gitExists2 ? getDefaultBranch(dir) : 'main';
+      const baseBranchInput = await ask(rl, 'Base branch', { defaultValue: detectedBranch });
+      const baseBranch = baseBranchInput !== detectedBranch ? baseBranchInput : undefined;
+
+      console.log(`  ${DIM}Glob patterns the agent must never touch (e.g. **/migrations/**, prisma/schema.prisma, **/*.sql)${RESET}`);
+      const blockedInput = await ask(rl, 'Blocked file patterns (optional, comma-separated)');
+      const blockedFiles = blockedInput
+        ? blockedInput.split(',').map((s) => s.trim()).filter(Boolean)
+        : undefined;
+
+      const skipPRInput = await ask(rl, 'Skip automatic PR creation?', { defaultValue: 'N' });
+      const skipPR = skipPRInput.toLowerCase() === 'y' || skipPRInput.toLowerCase() === 'yes' ? true : undefined;
+
+      projects.push({ name, dir, buildCmd: buildCmd || undefined, baseBranch, blockedFiles, skipPR });
       console.log('');
 
       const another = await ask(rl, 'Add another project?', { defaultValue: 'N' });

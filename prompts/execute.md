@@ -14,6 +14,7 @@ You have been given a ticket with an implementation spec. Follow the spec and im
 8. If the spec is unclear, implement the most conservative interpretation.
 9. Run existing tests if available, but do not add new test files unless the spec explicitly requires it.
 10. Do not modify files outside the scope of the spec.
+11. If your prompt includes a "BLOCKED FILES" section, you MUST NOT modify any files matching those patterns. Violations will cause the entire run to fail.
 
 ## When Done
 Commit all changes with a final commit message summarizing what was done. The commit message should reference the ticket title.

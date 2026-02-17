@@ -2,7 +2,10 @@
   "projects": {
     "MyProject": {
       "directory": "/absolute/path/to/project",
-      "buildCommand": "npm run build"
+      "buildCommand": "npm run build",
+      "baseBranch": "develop",
+      "blockedFiles": ["**/migrations/**", "prisma/schema.prisma", "**/*.sql"],
+      "skipPR": false
     }
   }
 }

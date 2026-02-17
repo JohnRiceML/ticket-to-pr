@@ -1,11 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { CONFIG, REVIEW_OUTPUT_SCHEMA, isPro, type LockEntry, type TicketDetails, type ReviewOutput } from './config.js';
-import { sleep, clamp, extractJsonFromOutput, shellEscape, extractNumber, loadEnv, createWorktree, removeWorktree, getDefaultBranch } from './lib/utils.js';
-import { getProjectDir, getProjectNames, getBuildCommand } from './lib/projects.js';
+import { sleep, clamp, extractJsonFromOutput, shellEscape, extractNumber, loadEnv, createWorktree, removeWorktree, getDefaultBranch, validateNoBlockedFiles } from './lib/utils.js';
+import { getProjectDir, getProjectNames, getBuildCommand, getBaseBranch, getBlockedFiles, getSkipPR } from './lib/projects.js';
 import {
   fetchTicketsByStatus,
   fetchTicketDetails,
@@ -15,10 +14,10 @@ import {
   writeFailure,
   addComment,
 } from './lib/notion.js';
+import { PACKAGE_ROOT, CONFIG_DIR } from './lib/paths.js';
 
-// Load .env.local
-const __dirname = dirname(fileURLToPath(import.meta.url));
-loadEnv(join(__dirname, '.env.local'));
+// Load .env.local from the user's working directory
+loadEnv(join(CONFIG_DIR, '.env.local'));
 
 // Allow running inside a Claude Code session (e.g. during development)
 delete process.env.CLAUDECODE;
@@ -58,9 +57,9 @@ function log(color: string, label: string, msg: string): void {
   console.log(`${ts()} ${color}[${label}]${RESET} ${msg}`);
 }
 
-// -- Prompt loading --
-const reviewPrompt = readFileSync(join(__dirname, 'prompts', 'review.md'), 'utf-8');
-const executePrompt = readFileSync(join(__dirname, 'prompts', 'execute.md'), 'utf-8');
+// -- Prompt loading (bundled with the package) --
+const reviewPrompt = readFileSync(join(PACKAGE_ROOT, 'prompts', 'review.md'), 'utf-8');
+const executePrompt = readFileSync(join(PACKAGE_ROOT, 'prompts', 'execute.md'), 'utf-8');
 
 // -- Agent Runner --
 
@@ -189,20 +188,25 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
   const branchName = `notion/${shortId}/${slug}`;
   const worktreeDir = join(projectDir, '.worktrees', branchName.replace(/\//g, '_'));
 
+  // Resolve per-project guardrails
+  const baseBranch = getBaseBranch(ticket.project) || getDefaultBranch(projectDir);
+  const blockedFiles = getBlockedFiles(ticket.project);
+  const skipPR = getSkipPR(ticket.project);
+
   log(MAGENTA, 'EXECUTE', `Starting execution for "${ticket.title}" on branch ${branchName}`);
   const startTime = Date.now();
 
   // Move to In Progress immediately
   await moveTicketStatus(ticket.id, CONFIG.COLUMNS.IN_PROGRESS);
 
-  // Git: create isolated worktree
-  createWorktree(projectDir, branchName, worktreeDir);
+  // Git: create isolated worktree (fetches origin/<baseBranch> first)
+  createWorktree(projectDir, branchName, worktreeDir, baseBranch);
 
   let cost = 0;
   let commitCount = 0;
 
   try {
-    const prompt = [
+    const promptParts = [
       executePrompt,
       '',
       '## Ticket',
@@ -219,7 +223,19 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
       '',
       '**Page Content**:',
       ticket.bodyBlocks,
-    ].join('\n');
+    ];
+
+    if (blockedFiles.length > 0) {
+      promptParts.push(
+        '',
+        '## BLOCKED FILES — DO NOT TOUCH',
+        'The following file patterns are off-limits. Do NOT create, modify, or delete any files matching these patterns. Violations will cause the entire run to fail.',
+        '',
+        ...blockedFiles.map((p) => `- \`${p}\``),
+      );
+    }
+
+    const prompt = promptParts.join('\n');
 
     const messages = query({
       prompt,
@@ -254,7 +270,6 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
     }
 
     // Count commits made
-    const baseBranch = getDefaultBranch(projectDir);
     try {
       const commitLog = execSync(`git log ${shellEscape(baseBranch)}..${shellEscape(branchName)} --oneline`, { cwd: worktreeDir, stdio: 'pipe' });
       commitCount = commitLog.toString().trim().split('\n').filter(Boolean).length;
@@ -284,40 +299,55 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
       }
     }
 
+    // Post-execution: validate no blocked files were touched
+    if (blockedFiles.length > 0) {
+      const violations = validateNoBlockedFiles(worktreeDir, baseBranch, blockedFiles);
+      if (violations.length > 0) {
+        throw new Error(
+          `Blocked file violation — the agent modified files that are off-limits:\n${violations.map((v) => `  - ${v}`).join('\n')}\n\nNo code was pushed. Fix the blocked file patterns in projects.json or adjust the ticket scope.`
+        );
+      }
+      log(GREEN, 'VALIDATE', 'No blocked file violations');
+    }
+
     // Push branch
     log(CYAN, 'PUSH', `Pushing ${branchName}`);
     execSync(`git push -u origin ${shellEscape(branchName)}`, { cwd: worktreeDir, stdio: 'pipe' });
 
-    // Create PR
+    // Create PR (unless skipPR is configured)
     let prUrl = '';
-    try {
-      log(CYAN, 'PR', 'Creating pull request...');
-      const prBody = [
-        '## Summary',
-        '',
-        ticket.spec ?? ticket.description,
-        '',
-        '## Impact',
-        '',
-        ticket.impact ?? '_No impact analysis_',
-        '',
-        `## Notion Ticket`,
-        '',
-        `[View in Notion](https://www.notion.so/${ticket.id.replace(/-/g, '')})`,
-        '',
-        '---',
-        `Cost: $${cost.toFixed(2)} | Review: Ease ${extractNumber(ticket, 'ease')}/10, Confidence ${extractNumber(ticket, 'confidence')}/10`,
-      ].join('\n');
+    if (skipPR) {
+      log(YELLOW, 'PR', 'Skipping PR creation (skipPR enabled for this project)');
+    } else {
+      try {
+        log(CYAN, 'PR', 'Creating pull request...');
+        const prBody = [
+          '## Summary',
+          '',
+          ticket.spec ?? ticket.description,
+          '',
+          '## Impact',
+          '',
+          ticket.impact ?? '_No impact analysis_',
+          '',
+          `## Notion Ticket`,
+          '',
+          `[View in Notion](https://www.notion.so/${ticket.id.replace(/-/g, '')})`,
+          '',
+          '---',
+          `Cost: $${cost.toFixed(2)} | Review: Ease ${extractNumber(ticket, 'ease')}/10, Confidence ${extractNumber(ticket, 'confidence')}/10`,
+        ].join('\n');
 
-      const prResult = execSync(
-        `gh pr create --title ${shellEscape(ticket.title)} --body ${shellEscape(prBody)} --base ${shellEscape(baseBranch)} --head ${branchName}`,
-        { cwd: worktreeDir, stdio: 'pipe', timeout: 30_000 },
-      );
-      prUrl = prResult.toString().trim();
-      log(GREEN, 'PR', `Created: ${prUrl}`);
-    } catch (e) {
-      // PR creation is best-effort — don't fail the ticket over it
-      log(YELLOW, 'PR', `Failed to create PR: ${e instanceof Error ? e.message : e}`);
+        const prResult = execSync(
+          `gh pr create --title ${shellEscape(ticket.title)} --body ${shellEscape(prBody)} --base ${shellEscape(baseBranch)} --head ${branchName}`,
+          { cwd: worktreeDir, stdio: 'pipe', timeout: 30_000 },
+        );
+        prUrl = prResult.toString().trim();
+        log(GREEN, 'PR', `Created: ${prUrl}`);
+      } catch (e) {
+        // PR creation is best-effort — don't fail the ticket over it
+        log(YELLOW, 'PR', `Failed to create PR: ${e instanceof Error ? e.message : e}`);
+      }
     }
 
     // Update Notion

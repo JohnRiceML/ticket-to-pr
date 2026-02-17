@@ -471,15 +471,17 @@ Replace `YOUR_USERNAME` and update the PATH to include your Node.js bin director
 
 ### Git Workflow
 
-1. Bridge creates an isolated git worktree with branch `notion/{8-char-id}/{ticket-slug}`
-2. Claude implements changes in the worktree, makes atomic commits
-3. Bridge runs build command (if configured for the project)
-4. Build passes: bridge pushes branch to origin
-5. Bridge creates a GitHub PR via `gh pr create` (includes spec, impact, Notion link, cost)
-6. PR URL written back to the ticket's `PR` property
-7. Ticket moves to PR Ready with branch name, cost, and PR link
-8. Build fails: ticket -> Failed
-9. Worktree is always cleaned up when done (main working directory is never touched)
+1. Bridge fetches `origin/<baseBranch>` (configurable per project, auto-detected by default)
+2. Creates an isolated git worktree with branch `notion/{8-char-id}/{ticket-slug}` based on the fresh remote state
+3. Claude implements changes in the worktree, makes atomic commits
+4. Bridge runs build command (if configured for the project)
+5. If `blockedFiles` patterns are configured, validates no off-limits files were touched
+6. Build passes + no blocked file violations: bridge pushes branch to origin
+7. Bridge creates a GitHub PR via `gh pr create` (unless `skipPR` is enabled)
+8. PR URL written back to the ticket's `PR` property
+9. Ticket moves to PR Ready with branch name, cost, and PR link
+10. Build fails or blocked file violation: ticket -> Failed, no code is pushed
+11. Worktree is always cleaned up when done (main working directory is never touched)
 
 Multiple execute agents can safely target the same project concurrently because each runs in its own worktree.
 
@@ -506,6 +508,9 @@ Project configuration in `projects.json`:
 |-------|---------|
 | `projects.<name>.directory` | Absolute path to the project's local git repo |
 | `projects.<name>.buildCommand` | Optional build validation command (e.g. `npm run build`) |
+| `projects.<name>.baseBranch` | Optional base branch (e.g. `develop`). Falls back to auto-detected default. |
+| `projects.<name>.blockedFiles` | Optional array of glob patterns the agent must never touch |
+| `projects.<name>.skipPR` | Optional boolean. Set `true` to push branch but skip PR creation. |
 
 ## File Structure
 
@@ -514,10 +519,10 @@ ticket-to-pr/
   index.ts              # Poll loop, agent runner, worktree git workflow, graceful shutdown
   cli.ts                # init (guided setup with live validation) and doctor (diagnostic + schema check)
   config.ts             # Budgets, column names, license check, TypeScript types
-  projects.json         # Your project directories and build commands (git-ignored, copy from example)
+  projects.json         # Your project directories, build commands, and guardrails (git-ignored, copy from example)
   projects.example.json # Template for projects.json
   lib/
-    utils.ts            # Pure utilities (shellEscape, clamp, loadEnv, getDefaultBranch, worktree helpers)
+    utils.ts            # Pure utilities (shellEscape, loadEnv, getDefaultBranch, worktree helpers, blocked file validation)
     projects.ts         # JSON-backed project config loader with caching
     notion.ts           # Notion API helpers (fetch, write, move status)
     __tests__/

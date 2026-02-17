@@ -34,6 +34,7 @@ TicketToPR clears that pile. Toss tickets on your Notion board, drag to Review, 
 - **AI scores before AI codes** — every ticket gets an ease/confidence rating and implementation spec before a single line is written. You always decide go/no-go.
 - **Your codebase, your rules** — Claude reads your project's `CLAUDE.md` and follows your conventions, patterns, and constraints.
 - **Build validation** — code must pass your build command before anything pushes. No broken PRs.
+- **Blocked file guardrails** — configure glob patterns for files the agent must never touch (e.g. migrations, DB schemas). Enforced via prompt + hard post-diff validation.
 - **Full audit trail** — cost, duration, scores, branch name, PR link, and agent comments posted directly on the Notion ticket.
 - **Cost transparency** — every ticket shows exactly what it cost. Simple tasks run $0.35-0.55.
 - **Human-in-the-loop** — nothing merges without a developer reviewing the PR.
@@ -247,6 +248,10 @@ Step 4: Projects
   Directory: /Users/you/Projects/MyApp
   ✓ Git repo  git@github.com:you/MyApp.git
   Build command (optional): npm run build
+  Base branch (main):
+  Glob patterns the agent must never touch (e.g. **/migrations/**, prisma/schema.prisma, **/*.sql)
+  Blocked file patterns (optional, comma-separated):
+  Skip automatic PR creation? (N):
 
   Add another project? (N):
 
@@ -296,8 +301,10 @@ Tools:
 
 Projects:
   ✓ MyApp                     /Users/you/Projects/MyApp
+  ○   Base branch             main (auto-detected)
+  ○   Blocked files           none configured
 
-Summary: 14 passed, 1 warnings, 0 failed
+Summary: 14 passed, 3 warnings, 0 failed
 Docs: https://www.tickettopr.com
 ```
 
@@ -412,14 +419,16 @@ The execute agent implements the code based on the spec:
 
 ### Git Workflow
 
-1. TicketToPR creates branch `notion/{8-char-id}/{ticket-slug}` from the default branch (auto-detected — `main`, `master`, etc.)
-2. Claude implements changes and makes atomic commits
-3. TicketToPR runs your build command (if configured)
-4. Build passes: pushes branch to origin
-5. Creates a GitHub PR via `gh pr create` targeting the default branch (includes spec, impact, Notion link, cost)
-6. PR URL written back to the Notion ticket
-7. Ticket moves to **PR Ready**
-8. Build fails: branch kept locally, ticket moves to **Failed**
+1. TicketToPR **fetches the latest** from `origin/<baseBranch>` (configurable per project, auto-detected by default)
+2. Creates branch `notion/{8-char-id}/{ticket-slug}` based on the fresh remote state
+3. Claude implements changes and makes atomic commits
+4. TicketToPR runs your build command (if configured)
+5. If `blockedFiles` patterns are configured, validates no off-limits files were touched
+6. Build passes + no blocked file violations: pushes branch to origin
+7. Creates a GitHub PR via `gh pr create` targeting the base branch (unless `skipPR` is enabled)
+8. PR URL written back to the Notion ticket
+9. Ticket moves to **PR Ready**
+10. Build fails or blocked file violation: no code is pushed, ticket moves to **Failed**
 
 ## Costs
 
@@ -478,6 +487,9 @@ Project configuration in `projects.json`:
 |-------|---------|
 | `projects.<name>.directory` | Absolute path to the project's local git repo |
 | `projects.<name>.buildCommand` | Optional build validation command (e.g. `npm run build`) |
+| `projects.<name>.baseBranch` | Optional base branch (e.g. `develop`). Falls back to auto-detected default (`main`/`master`). |
+| `projects.<name>.blockedFiles` | Optional array of glob patterns the agent must never touch (e.g. `["**/migrations/**", "**/*.sql"]`) |
+| `projects.<name>.skipPR` | Optional boolean. Set `true` to push the branch but skip automatic PR creation. |
 
 ## Project Structure
 
@@ -510,17 +522,23 @@ Add to `projects.json` (or re-run `ticket-to-pr init`):
   "projects": {
     "MyProject": {
       "directory": "/absolute/path/to/project",
-      "buildCommand": "npm run build"
+      "buildCommand": "npm run build",
+      "baseBranch": "develop",
+      "blockedFiles": ["**/migrations/**", "prisma/schema.prisma", "**/*.sql"],
+      "skipPR": false
     }
   }
 }
 ```
 
-1. `buildCommand` is optional — omit it if you don't need build validation
-2. The directory must be a git repo with an `origin` remote
-3. If the project has a `CLAUDE.md`, both agents will read it for context
-4. Create Notion tickets with `Project` set to the exact key name (case-sensitive)
-5. Run `ticket-to-pr doctor` to verify — it will check the schema and project match
+1. All fields except `directory` are optional — omit any you don't need
+2. `baseBranch` — which branch to base feature branches on. Auto-detected (`main`/`master`) if omitted.
+3. `blockedFiles` — glob patterns the agent must never touch. Enforced both via prompt injection and a hard post-diff validation before push.
+4. `skipPR` — set `true` to push branches without creating a PR (useful for repos that use a different PR workflow)
+5. The directory must be a git repo with an `origin` remote
+6. If the project has a `CLAUDE.md`, both agents will read it for context
+7. Create Notion tickets with `Project` set to the exact key name (case-sensitive)
+8. Run `ticket-to-pr doctor` to verify — it shows base branch, blocked files, and skip PR status per project
 
 ## Error Handling
 
@@ -531,6 +549,7 @@ Add to `projects.json` (or re-run `ticket-to-pr init`):
 | Review agent fails | Ticket -> Failed, error written to Impact field with actionable detail |
 | Execute agent fails | Worktree cleaned up, ticket -> Failed |
 | Build validation fails | Ticket -> Failed with command, directory, and build output (up to 500 chars) |
+| Blocked file violation | Ticket -> Failed with list of matched files and patterns. No code is pushed. |
 | Push fails | Ticket -> Failed, branch remains local |
 | PR creation fails | Ticket still moves to PR Ready (best-effort) |
 | Duplicate poll trigger | Skipped via in-memory lock per ticket ID |
@@ -610,6 +629,7 @@ Add to `projects.json` (or re-run `ticket-to-pr init`):
 - **Read-only review** — the review agent cannot modify files. It only reads and analyzes.
 - **Sandboxed execution** — the execute agent has no access to the web, cannot push code, and cannot run destructive commands. TicketToPR handles git operations separately.
 - **Build gate** — code must pass your build validation before anything is pushed.
+- **Blocked file gate** — if `blockedFiles` patterns are configured, a post-diff check runs before push. Any violations abort the run — no code reaches origin.
 - **Human gate** — pull requests require your review and approval before merging.
 
 ## Tech Stack
