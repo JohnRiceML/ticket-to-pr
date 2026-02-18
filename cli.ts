@@ -2,7 +2,7 @@ import { createInterface, type Interface } from 'node:readline';
 import { execSync } from 'node:child_process';
 import { readFileSync, existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { mask, shellEscape, writeEnvFile, updateProjectsFile, getDefaultBranch } from './lib/utils.js';
+import { mask, shellEscape, writeEnvFile, updateProjectsFile, getDefaultBranch, parseEnvFile } from './lib/utils.js';
 import { getProjectNames, getProjectDir, getBaseBranch, getBlockedFiles, getSkipPR } from './lib/projects.js';
 import { CONFIG_DIR } from './lib/paths.js';
 import type { Client as NotionClient } from '@notionhq/client';
@@ -810,4 +810,95 @@ export async function runInit(): Promise<void> {
   } finally {
     rl.close();
   }
+}
+
+// -- Model --
+
+const KNOWN_MODELS: Array<{ alias: string; id: string; description: string }> = [
+  { alias: 'opus',    id: 'claude-opus-4-6',              description: 'Best quality, highest cost' },
+  { alias: 'sonnet',  id: 'claude-sonnet-4-6',            description: 'Fast and capable (recommended for review)' },
+  { alias: 'sonnet45',id: 'claude-sonnet-4-5-20250929',   description: 'Previous generation Sonnet' },
+  { alias: 'haiku',   id: 'claude-haiku-4-5-20251001',    description: 'Fastest, lowest cost' },
+];
+
+function resolveModel(input: string): { alias: string; id: string } | null {
+  const lower = input.toLowerCase();
+  const byAlias = KNOWN_MODELS.find((m) => m.alias === lower);
+  if (byAlias) return byAlias;
+  const byId = KNOWN_MODELS.find((m) => m.id === lower);
+  if (byId) return byId;
+  // Accept any claude- prefixed model ID as a pass-through
+  if (input.startsWith('claude-')) return { alias: input, id: input };
+  return null;
+}
+
+export async function runModel(args: string[]): Promise<void> {
+  const envPath = join(CONFIG_DIR, '.env.local');
+  const envVars = parseEnvFile(envPath);
+
+  const currentReview = envVars.REVIEW_MODEL || 'claude-sonnet-4-6';
+  const currentExecute = envVars.EXECUTE_MODEL || 'claude-opus-4-6';
+
+  // No args: show current models and available options
+  if (args.length === 0) {
+    console.log(`\n${BOLD}Current models:${RESET}`);
+    const reviewAlias = KNOWN_MODELS.find((m) => m.id === currentReview)?.alias;
+    const executeAlias = KNOWN_MODELS.find((m) => m.id === currentExecute)?.alias;
+    console.log(`  Review:   ${GREEN}${currentReview}${RESET}${reviewAlias ? ` (${reviewAlias})` : ''}`);
+    console.log(`  Execute:  ${GREEN}${currentExecute}${RESET}${executeAlias ? ` (${executeAlias})` : ''}`);
+
+    console.log(`\n${BOLD}Available models:${RESET}`);
+    for (const m of KNOWN_MODELS) {
+      console.log(`  ${BOLD}${m.alias.padEnd(10)}${RESET} ${DIM}${m.id.padEnd(35)}${RESET} ${m.description}`);
+    }
+
+    console.log(`\n${BOLD}Usage:${RESET}`);
+    console.log(`  ticket-to-pr model review sonnet     ${DIM}# set review model${RESET}`);
+    console.log(`  ticket-to-pr model execute opus       ${DIM}# set execute model${RESET}`);
+    console.log(`  ticket-to-pr model both haiku         ${DIM}# set both at once${RESET}\n`);
+    return;
+  }
+
+  // Parse: model <agent> <model>
+  if (args.length < 2) {
+    console.log(`${RED}Usage: ticket-to-pr model <review|execute|both> <model>${RESET}`);
+    console.log(`${DIM}Run "ticket-to-pr model" to see available models.${RESET}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const agent = args[0].toLowerCase();
+  const modelInput = args[1];
+
+  if (!['review', 'execute', 'both'].includes(agent)) {
+    console.log(`${RED}Unknown agent "${args[0]}". Use: review, execute, or both${RESET}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const resolved = resolveModel(modelInput);
+  if (!resolved) {
+    console.log(`${RED}Unknown model "${modelInput}".${RESET}`);
+    console.log(`\n${BOLD}Available models:${RESET}`);
+    for (const m of KNOWN_MODELS) {
+      console.log(`  ${BOLD}${m.alias.padEnd(10)}${RESET} ${DIM}${m.id}${RESET}`);
+    }
+    console.log(`\n${DIM}You can also pass a full model ID like claude-sonnet-4-5-20250929${RESET}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const updates: Record<string, string> = {};
+  if (agent === 'review' || agent === 'both') updates.REVIEW_MODEL = resolved.id;
+  if (agent === 'execute' || agent === 'both') updates.EXECUTE_MODEL = resolved.id;
+
+  writeEnvFile(envPath, updates);
+
+  if (updates.REVIEW_MODEL) {
+    printStatus(true, 'Review model', `${resolved.id}${resolved.alias !== resolved.id ? ` (${resolved.alias})` : ''}`);
+  }
+  if (updates.EXECUTE_MODEL) {
+    printStatus(true, 'Execute model', `${resolved.id}${resolved.alias !== resolved.id ? ` (${resolved.alias})` : ''}`);
+  }
+  console.log(`${DIM}Saved to .env.local. Takes effect on next poll cycle.${RESET}\n`);
 }

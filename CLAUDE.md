@@ -307,11 +307,18 @@ Create `.env.local` in the project root (this file is git-ignored):
 ```bash
 NOTION_TOKEN=ntn_your_token_here
 NOTION_DATABASE_ID=your_32_char_hex_database_id
-
-# Optional: override default models (sonnet for review, opus for execute)
-# REVIEW_MODEL=claude-sonnet-4-6
-# EXECUTE_MODEL=claude-opus-4-6
 ```
+
+Models are configured during `ticket-to-pr init` or changed anytime with:
+
+```bash
+ticket-to-pr model                        # view current models
+ticket-to-pr model review sonnet          # set review model
+ticket-to-pr model execute opus           # set execute model
+ticket-to-pr model both haiku             # set both at once
+```
+
+Available aliases: `opus`, `sonnet`, `sonnet45`, `haiku`. Full model IDs also accepted.
 
 ### 4. Authenticate GitHub CLI
 
@@ -441,6 +448,8 @@ Replace `YOUR_USERNAME` and update the PATH to include your Node.js bin director
 |----------------|----------|
 | `init` | Guided setup — validates Notion credentials live, auto-detects build commands, generates starter `CLAUDE.md`, configures projects, writes `.env.local` and `projects.json`. Detects existing config on re-run. |
 | `doctor` | Diagnostic check — verifies environment, Notion connectivity, database schema (10 required properties), tools, and projects |
+| `model` | View current models and available options |
+| `model <review\|execute\|both> <model>` | Set the Claude model for review, execute, or both agents. Accepts aliases (`opus`, `sonnet`, `haiku`) or full model IDs. |
 | (none) | Continuous polling every 30s |
 | `--once` | Poll once, wait for agents to finish, exit |
 | `--dry-run` | Poll and log what would happen, don't run agents |
@@ -495,8 +504,8 @@ Settings in `config.ts`:
 
 | Setting | Default | Purpose |
 |---------|---------|---------|
-| `REVIEW_MODEL` | `claude-sonnet-4-6` | Claude model for review agent |
-| `EXECUTE_MODEL` | `claude-opus-4-6` | Claude model for execute agent |
+| `REVIEW_MODEL` | `claude-sonnet-4-6` | Claude model for review agent (change with `ticket-to-pr model review <model>`) |
+| `EXECUTE_MODEL` | `claude-opus-4-6` | Claude model for execute agent (change with `ticket-to-pr model execute <model>`) |
 | `POLL_INTERVAL_MS` | 30000 | How often to check Notion (ms) |
 | `REVIEW_BUDGET_USD` | 2.00 | Max USD per review agent run |
 | `EXECUTE_BUDGET_USD` | 15.00 | Max USD per execute agent run |
@@ -521,7 +530,7 @@ Project configuration in `projects.json`:
 ```
 ticket-to-pr/
   index.ts              # Poll loop, agent runner, worktree git workflow, graceful shutdown
-  cli.ts                # init (guided setup with live validation) and doctor (diagnostic + schema check)
+  cli.ts                # init, doctor, and model commands
   config.ts             # Budgets, column names, license check, TypeScript types
   projects.json         # Your project directories, build commands, and guardrails (git-ignored, copy from example)
   projects.example.json # Template for projects.json

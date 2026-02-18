@@ -24,9 +24,13 @@ delete process.env.CLAUDECODE;
 
 // -- Subcommand routing --
 const subcommand = process.argv[2];
-if (subcommand === 'init' || subcommand === 'doctor') {
-  const { runInit, runDoctor } = await import('./cli.js');
-  await (subcommand === 'init' ? runInit() : runDoctor());
+if (subcommand === 'init' || subcommand === 'doctor' || subcommand === 'model') {
+  const { runInit, runDoctor, runModel } = await import('./cli.js');
+  if (subcommand === 'model') {
+    await runModel(process.argv.slice(3));
+  } else {
+    await (subcommand === 'init' ? runInit() : runDoctor());
+  }
   process.exit(0);
 }
 

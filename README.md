@@ -212,6 +212,8 @@ ticket-to-pr --dry-run --once
 |----------------|----------|
 | `init` | Guided setup — validates Notion credentials live, auto-detects build commands, generates starter `CLAUDE.md`, configures projects, writes `.env.local` and `projects.json`. Detects existing config on re-run. |
 | `doctor` | Diagnostic check — verifies environment, Notion connectivity, database schema, tools, and projects |
+| `model` | View current models and available options |
+| `model <review\|execute\|both> <model>` | Set the Claude model for an agent. Accepts aliases (`opus`, `sonnet`, `haiku`) or full model IDs. |
 | *(none)* | Continuous polling every 30s |
 | `--once` | Poll once, wait for agents to finish, exit |
 | `--dry-run` | Poll and log what would happen, don't run agents |
@@ -319,6 +321,35 @@ Docs: https://www.tickettopr.com
 - **Project mismatch detection** — if Project is a Select field, warns when Notion options and `projects.json` keys don't match
 - `gh` missing is a warning (PRs won't auto-create but everything else works), `claude` missing is a hard failure
 - Exits with code 1 if any hard failures, 0 otherwise
+
+### `model` — Change AI Models
+
+View or change which Claude models the agents use:
+
+```bash
+# Show current models and available options
+ticket-to-pr model
+
+# Set review model (used for scoring tickets)
+ticket-to-pr model review sonnet
+
+# Set execute model (used for writing code)
+ticket-to-pr model execute opus
+
+# Set both at once
+ticket-to-pr model both haiku
+```
+
+Available model aliases:
+
+| Alias | Model ID | Best for |
+|-------|----------|----------|
+| `opus` | `claude-opus-4-6` | Best quality (recommended for execute) |
+| `sonnet` | `claude-sonnet-4-6` | Fast and capable (recommended for review) |
+| `sonnet45` | `claude-sonnet-4-5-20250929` | Previous generation Sonnet |
+| `haiku` | `claude-haiku-4-5-20251001` | Fastest, lowest cost |
+
+You can also pass a full model ID directly (e.g. `ticket-to-pr model review claude-sonnet-4-5-20250929`). Changes are saved to `.env.local` and take effect on the next poll cycle.
 
 ### Your First Ticket
 
@@ -481,6 +512,8 @@ All settings in `config.ts`:
 
 | Setting | Default | Purpose |
 |---------|---------|---------|
+| `REVIEW_MODEL` | `claude-sonnet-4-6` | Review agent model (change with `ticket-to-pr model review <model>`) |
+| `EXECUTE_MODEL` | `claude-opus-4-6` | Execute agent model (change with `ticket-to-pr model execute <model>`) |
 | `POLL_INTERVAL_MS` | 30000 | How often to check Notion (ms) |
 | `REVIEW_BUDGET_USD` | 2.00 | Max USD per review agent run |
 | `EXECUTE_BUDGET_USD` | 15.00 | Max USD per execute agent run |
@@ -505,7 +538,7 @@ Project configuration in `projects.json`:
 ```
 ticket-to-pr/
   index.ts              # Poll loop, agent runner, worktree git workflow, graceful shutdown
-  cli.ts                # init (guided setup with validation) and doctor (diagnostic + schema check)
+  cli.ts                # init, doctor, and model commands
   config.ts             # Budgets, column names, license check, TypeScript types
   projects.json         # Your project directories and build commands (git-ignored, copy from example)
   projects.example.json # Template for projects.json
