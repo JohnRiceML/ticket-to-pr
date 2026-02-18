@@ -1,6 +1,6 @@
 {
   "name": "ticket-to-pr",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Drag a Notion ticket, get a pull request. AI-powered dev automation.",
   "type": "module",
   "bin": {
@@ -12,6 +12,22 @@
     "prompts",
     "projects.example.json",
     "README.md"
+  ],
+  "homepage": "https://www.tickettopr.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JohnRiceML/ticket-to-pr.git"
+  },
+  "bugs": {
+    "url": "https://github.com/JohnRiceML/ticket-to-pr/issues"
+  },
+  "keywords": [
+    "notion",
+    "claude",
+    "ai",
+    "pull-request",
+    "automation",
+    "developer-tools"
   ],
   "engines": {
     "node": ">=18.0.0"

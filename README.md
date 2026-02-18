@@ -289,7 +289,7 @@ Environment:
   ○ LICENSE_KEY               Free tier
 
 Models:
-  ✓ Review model              claude-sonnet-4-5-20250929
+  ✓ Review model              claude-sonnet-4-6
   ✓ Execute model             claude-opus-4-6
 
 Notion:

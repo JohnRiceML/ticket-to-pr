@@ -650,7 +650,7 @@ export async function runInit(): Promise<void> {
     console.log(`  ${DIM}Sonnet = fast/cheap, Opus = best quality, Haiku = fastest/cheapest${RESET}\n`);
 
     const modelChoices = [
-      { label: 'sonnet', id: 'claude-sonnet-4-5-20250929' },
+      { label: 'sonnet', id: 'claude-sonnet-4-6' },
       { label: 'opus',   id: 'claude-opus-4-6' },
       { label: 'haiku',  id: 'claude-haiku-4-5-20251001' },
     ];

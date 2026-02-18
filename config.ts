@@ -58,7 +58,7 @@ export const CONFIG = {
 
   // Agent models (env override → default)
   get REVIEW_MODEL(): string {
-    return process.env.REVIEW_MODEL || 'claude-sonnet-4-5-20250929';
+    return process.env.REVIEW_MODEL || 'claude-sonnet-4-6';
   },
   get EXECUTE_MODEL(): string {
     return process.env.EXECUTE_MODEL || 'claude-opus-4-6';

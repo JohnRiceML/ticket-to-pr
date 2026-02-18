@@ -309,7 +309,7 @@ NOTION_TOKEN=ntn_your_token_here
 NOTION_DATABASE_ID=your_32_char_hex_database_id
 
 # Optional: override default models (sonnet for review, opus for execute)
-# REVIEW_MODEL=claude-sonnet-4-5-20250929
+# REVIEW_MODEL=claude-sonnet-4-6
 # EXECUTE_MODEL=claude-opus-4-6
 ```
 
@@ -450,7 +450,7 @@ Replace `YOUR_USERNAME` and update the PATH to include your Node.js bin director
 
 ### Review Agent (read-only)
 
-- Model: Sonnet 4.5 (configurable via `REVIEW_MODEL` in config.ts)
+- Model: Sonnet 4.6 (configurable via `REVIEW_MODEL` in config.ts)
 - Tools: Read, Glob, Grep, Task
 - Loads the target project's `CLAUDE.md` for architecture context
 - If `blockedFiles` are configured, factors those constraints into scoring (lowers ease/confidence if natural implementation would touch blocked files)
@@ -495,7 +495,7 @@ Settings in `config.ts`:
 
 | Setting | Default | Purpose |
 |---------|---------|---------|
-| `REVIEW_MODEL` | `claude-sonnet-4-5-20250929` | Claude model for review agent |
+| `REVIEW_MODEL` | `claude-sonnet-4-6` | Claude model for review agent |
 | `EXECUTE_MODEL` | `claude-opus-4-6` | Claude model for execute agent |
 | `POLL_INTERVAL_MS` | 30000 | How often to check Notion (ms) |
 | `REVIEW_BUDGET_USD` | 2.00 | Max USD per review agent run |
