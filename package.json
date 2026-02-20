@@ -1,6 +1,6 @@
 {
   "name": "ticket-to-pr",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Drag a Notion ticket, get a pull request. AI-powered dev automation.",
   "type": "module",
   "bin": {

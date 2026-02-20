@@ -67,6 +67,7 @@ function log(color: string, label: string, msg: string): void {
 const reviewPrompt = readFileSync(join(PACKAGE_ROOT, 'prompts', 'review.md'), 'utf-8');
 const executePrompt = readFileSync(join(PACKAGE_ROOT, 'prompts', 'execute.md'), 'utf-8');
 const diffReviewPrompt = readFileSync(join(PACKAGE_ROOT, 'prompts', 'diff-review.md'), 'utf-8');
+const retroPrompt = readFileSync(join(PACKAGE_ROOT, 'prompts', 'retro.md'), 'utf-8');
 
 // -- Agent Runner --
 
@@ -328,6 +329,119 @@ async function runDiffReviewAgent(
   };
 }
 
+async function runRetroAgent(
+  projectDir: string,
+  worktreeDir: string,
+  baseBranch: string,
+  ticket: TicketDetails,
+  outcome: { success: boolean; error?: string; diffReviewIssues?: string[]; buildFailed?: boolean },
+): Promise<void> {
+  try {
+    // Get the diff (may be empty if agent failed before committing)
+    let diff = '';
+    try {
+      diff = execSync(`git diff origin/${shellEscape(baseBranch)}...HEAD`, {
+        cwd: worktreeDir, stdio: 'pipe', timeout: 15_000,
+      }).toString();
+    } catch {
+      // No diff available
+    }
+
+    // Read existing learnings to avoid repeats
+    const existingLearnings = readLearnings(projectDir);
+
+    // Build the retro prompt
+    const parts = [
+      retroPrompt,
+      '',
+      `## Ticket: ${ticket.title}`,
+      '',
+      '**Description**:',
+      ticket.description,
+      '',
+      '**Spec**:',
+      ticket.spec ?? '(none)',
+      '',
+      `## Outcome: ${outcome.success ? 'SUCCESS' : 'FAILED'}`,
+    ];
+
+    if (!outcome.success && outcome.error) {
+      parts.push('', '**Error**:', outcome.error.slice(0, 1000));
+    }
+    if (outcome.diffReviewIssues && outcome.diffReviewIssues.length > 0) {
+      parts.push('', '**Diff Review Issues**:', ...outcome.diffReviewIssues.map(i => `- ${i}`));
+    }
+    if (outcome.buildFailed) {
+      parts.push('', '**Build**: FAILED');
+    }
+
+    if (diff) {
+      const truncatedDiff = diff.length > 50_000 ? diff.slice(0, 50_000) + '\n...(truncated)' : diff;
+      parts.push('', '## Diff', '```diff', truncatedDiff, '```');
+    } else {
+      parts.push('', '## Diff', 'No diff available (agent may have failed before committing).');
+    }
+
+    if (existingLearnings) {
+      parts.push('', '## Existing Learnings (do not repeat these)', existingLearnings);
+    }
+
+    const prompt = parts.join('\n');
+
+    const messages = query({
+      prompt,
+      options: {
+        model: CONFIG.DIFF_REVIEW_MODEL, // Reuse Haiku config
+        cwd: projectDir,
+        tools: ['Read', 'Glob', 'Grep'],
+        allowedTools: ['Read', 'Glob', 'Grep'],
+        maxTurns: 5,
+        maxBudgetUsd: 0.25,
+        permissionMode: 'bypassPermissions',
+        allowDangerouslySkipPermissions: true,
+        settingSources: ['project'],
+        systemPrompt: { type: 'preset', preset: 'claude_code' },
+        stderr: () => {},
+      },
+    });
+
+    let output = '';
+
+    for await (const message of messages) {
+      if (message.type === 'assistant') {
+        const content = message.message?.content;
+        if (Array.isArray(content)) {
+          for (const block of content) {
+            if (block.type === 'text') output = block.text;
+          }
+        } else if (typeof content === 'string') {
+          output = content;
+        }
+      }
+      if (message.type === 'result') {
+        if ('result' in message && message.result) {
+          output = message.result as string;
+        }
+      }
+    }
+
+    // Only save if the retro produced something meaningful
+    const trimmed = output.trim();
+    if (trimmed && !trimmed.toLowerCase().includes('no new learnings')) {
+      const header = outcome.success
+        ? `**Retro (success): ${ticket.title}**`
+        : `**Retro (failed): ${ticket.title}**`;
+      appendLearning(projectDir, `${header}\n${trimmed}`);
+      log(DIM, 'RETRO', `Saved ${trimmed.split('\n').filter(l => l.startsWith('-') || l.startsWith('*')).length} learnings`);
+    } else {
+      log(DIM, 'RETRO', 'No new learnings');
+    }
+  } catch (e) {
+    // Retro is best-effort — never block the pipeline
+    log(DIM, 'RETRO', `Skipped: ${e instanceof Error ? e.message : e}`);
+  }
+}
+
 async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
   const projectDir = getProjectDir(ticket.project);
   if (!projectDir) {
@@ -362,6 +476,7 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
 
   let cost = 0;
   let commitCount = 0;
+  let retroOutcome: { success: boolean; error?: string; diffReviewIssues?: string[]; buildFailed?: boolean } = { success: false };
 
   try {
     const promptParts = [
@@ -497,6 +612,7 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
     const diffReview = await runDiffReviewAgent(worktreeDir, baseBranch, ticket.spec ?? '', ticket.description, []);
     cost += diffReview.cost;
     if (!diffReview.result.approved) {
+      retroOutcome = { success: false, error: 'Diff review rejected the changes', diffReviewIssues: diffReview.result.issues };
       throw new Error(`Diff review failed:\n${diffReview.result.issues.map(i => `  - ${i}`).join('\n')}`);
     }
     log(GREEN, 'REVIEW', `Diff review passed: ${diffReview.result.summary}`);
@@ -590,11 +706,7 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
     ].join('\n');
     await addComment(ticket.id, comment);
 
-    appendLearning(projectDir, [
-      `**Execute: ${ticket.title}**`,
-      `Branch: ${branchName}, Commits: ${commitCount}`,
-      `Cost: $${cost.toFixed(2)}`,
-    ].join('\n'));
+    retroOutcome = { success: true };
 
     log(GREEN, 'EXECUTE', `Done: branch=${branchName} cost=$${cost.toFixed(2)}${prUrl ? ` pr=${prUrl}` : ''}`);
   } catch (error) {
@@ -608,12 +720,17 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
       `Cost: $${cost.toFixed(2)} | Duration: ${duration}s`,
     ].join('\n');
     await addComment(ticket.id, comment);
-    appendLearning(projectDir, [
-      `**Failed execute: ${ticket.title}**`,
-      `Error: ${errMsg.slice(0, 200)}`,
-    ].join('\n'));
+    retroOutcome = {
+      success: false,
+      error: errMsg,
+      buildFailed: errMsg.includes('Build validation failed'),
+    };
     throw error;
   } finally {
+    // Run retro before cleaning up worktree (so it can read the diff)
+    log(DIM, 'RETRO', 'Running post-execution retrospective...');
+    await runRetroAgent(projectDir, worktreeDir, baseBranch, ticket, retroOutcome);
+
     // Always clean up the worktree
     removeWorktree(projectDir, worktreeDir);
   }
