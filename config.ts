@@ -55,6 +55,7 @@ export const CONFIG = {
   // Agent budgets
   REVIEW_BUDGET_USD: 2.00,
   EXECUTE_BUDGET_USD: 15.00,
+  DIFF_REVIEW_BUDGET_USD: 0.50,
 
   // Agent models (env override → default)
   get REVIEW_MODEL(): string {
@@ -63,10 +64,14 @@ export const CONFIG = {
   get EXECUTE_MODEL(): string {
     return process.env.EXECUTE_MODEL || 'claude-opus-4-6';
   },
+  get DIFF_REVIEW_MODEL(): string {
+    return process.env.DIFF_REVIEW_MODEL || 'claude-haiku-4-5-20251001';
+  },
 
   // Agent limits
   REVIEW_MAX_TURNS: 25,
   EXECUTE_MAX_TURNS: 50,
+  DIFF_REVIEW_MAX_TURNS: 10,
 
   // Stale lock timeout (30 minutes)
   STALE_LOCK_MS: 30 * 60 * 1000,
@@ -90,8 +95,20 @@ export const REVIEW_OUTPUT_SCHEMA = {
     impactReport: { type: 'string' },
     affectedFiles: { type: 'array', items: { type: 'string' } },
     risks: { type: 'string' },
+    testCases: { type: 'array', items: { type: 'string' } },
   },
-  required: ['easeScore', 'confidenceScore', 'spec', 'impactReport', 'affectedFiles'],
+  required: ['easeScore', 'confidenceScore', 'spec', 'impactReport', 'affectedFiles', 'testCases'],
+} as const;
+
+// JSON schema for diff review agent structured output
+export const DIFF_REVIEW_SCHEMA = {
+  type: 'object',
+  properties: {
+    approved: { type: 'boolean' },
+    issues: { type: 'array', items: { type: 'string' } },
+    summary: { type: 'string' },
+  },
+  required: ['approved', 'issues', 'summary'],
 } as const;
 
 // Types
@@ -117,6 +134,13 @@ export interface ReviewOutput {
   impactReport: string;
   affectedFiles: string[];
   risks?: string;
+  testCases: string[];
+}
+
+export interface DiffReviewOutput {
+  approved: boolean;
+  issues: string[];
+  summary: string;
 }
 
 export interface LockEntry {

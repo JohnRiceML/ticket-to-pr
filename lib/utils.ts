@@ -220,11 +220,21 @@ export function _resetDefaultBranchCache(): void {
 export function ensureWorktreesIgnored(projectDir: string): void {
   const gitignorePath = join(projectDir, '.gitignore');
   try {
-    const content = existsSync(gitignorePath) ? readFileSync(gitignorePath, 'utf-8') : '';
+    let content = existsSync(gitignorePath) ? readFileSync(gitignorePath, 'utf-8') : '';
     const lines = content.split('\n');
+    let modified = false;
     if (!lines.some((line) => line.trim() === '.worktrees' || line.trim() === '.worktrees/')) {
       const separator = content.length > 0 && !content.endsWith('\n') ? '\n' : '';
-      writeFileSync(gitignorePath, content + separator + '.worktrees/\n');
+      content = content + separator + '.worktrees/\n';
+      modified = true;
+    }
+    if (!lines.some((line) => line.trim() === '.ticket-to-pr' || line.trim() === '.ticket-to-pr/')) {
+      const separator = content.length > 0 && !content.endsWith('\n') ? '\n' : '';
+      content = content + separator + '.ticket-to-pr/\n';
+      modified = true;
+    }
+    if (modified) {
+      writeFileSync(gitignorePath, content);
     }
   } catch {
     // Best effort — don't block worktree creation over gitignore
@@ -369,4 +379,43 @@ export function removeWorktree(projectDir: string, worktreeDir: string): void {
       // Best effort
     }
   }
+}
+
+// -- Per-project learnings --
+
+const MAX_LEARNINGS_ENTRIES = 100;
+
+export function readLearnings(projectDir: string): string {
+  const learningsPath = join(projectDir, '.ticket-to-pr', 'learnings.md');
+  try {
+    return readFileSync(learningsPath, 'utf-8');
+  } catch {
+    return '';
+  }
+}
+
+export function appendLearning(projectDir: string, entry: string): void {
+  const dir = join(projectDir, '.ticket-to-pr');
+  mkdirSync(dir, { recursive: true });
+
+  const learningsPath = join(dir, 'learnings.md');
+  let content = '';
+  try {
+    content = readFileSync(learningsPath, 'utf-8');
+  } catch {
+    // File doesn't exist yet
+  }
+
+  // Add timestamped entry
+  const timestamp = new Date().toISOString().slice(0, 10);
+  const newEntry = `### ${timestamp}\n${entry}\n`;
+  content = content + '\n' + newEntry;
+
+  // Trim to max entries
+  const entries = content.split(/(?=^### \d{4}-\d{2}-\d{2}$)/m).filter(e => e.trim());
+  if (entries.length > MAX_LEARNINGS_ENTRIES) {
+    content = entries.slice(-MAX_LEARNINGS_ENTRIES).join('');
+  }
+
+  writeFileSync(learningsPath, content.trim() + '\n');
 }

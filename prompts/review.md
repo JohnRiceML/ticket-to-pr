@@ -30,9 +30,22 @@ You MUST end your response with a JSON code block containing exactly these field
   "spec": "<step-by-step implementation plan in markdown>",
   "impactReport": "<which files change and why, in markdown>",
   "affectedFiles": ["<file1>", "<file2>"],
-  "risks": "<any concerns or blockers, optional>"
+  "risks": "<any concerns or blockers, optional>",
+  "testCases": ["<test case 1>", "<test case 2>", "..."]
 }
 ```
+
+### Test Cases
+
+Generate 3-8 acceptance test cases depending on ticket complexity. These are framework-agnostic acceptance criteria (not full test files) that the execute agent must satisfy.
+
+- Write each test case as a "GIVEN... WHEN... THEN..." statement or a simple assertion
+- Focus on verifiable outcomes, not implementation details
+- Cover happy path, edge cases, and error handling as appropriate
+- Examples:
+  - "GET /api/health returns 200 with JSON body containing status:'ok' and a valid ISO timestamp"
+  - "Calling formatDate(null) returns empty string"
+  - "GIVEN a user is not authenticated WHEN they request /api/private THEN they receive a 401 response"
 
 ## Rules
 - DO NOT modify any files. You are read-only.

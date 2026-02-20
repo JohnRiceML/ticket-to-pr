@@ -214,6 +214,9 @@ ticket-to-pr --dry-run --once
 | `doctor` | Diagnostic check — verifies environment, Notion connectivity, database schema, tools, and projects |
 | `model` | View current models and available options |
 | `model <review\|execute\|both> <model>` | Set the Claude model for an agent. Accepts aliases (`opus`, `sonnet`, `haiku`) or full model IDs. |
+| `learnings` | View accumulated project learnings from past agent runs |
+| `learnings <project>` | View learnings for a specific project |
+| `learnings clear <project>` | Clear a project's learnings file |
 | *(none)* | Continuous polling every 30s |
 | `--once` | Poll once, wait for agents to finish, exit |
 | `--dry-run` | Poll and log what would happen, don't run agents |
@@ -351,6 +354,23 @@ Available model aliases:
 
 You can also pass a full model ID directly (e.g. `ticket-to-pr model review claude-sonnet-4-5-20250929`). Changes are saved to `.env.local` and take effect on the next poll cycle.
 
+### `learnings` — Project Memory
+
+TicketToPR accumulates learnings from every agent run — successes, failures, patterns, and mistakes. These are automatically injected into future agent prompts so the AI gets smarter about your project over time.
+
+```bash
+# View all project learnings
+ticket-to-pr learnings
+
+# View learnings for a specific project
+ticket-to-pr learnings MyProject
+
+# Clear learnings for a project (start fresh)
+ticket-to-pr learnings clear MyProject
+```
+
+Learnings are stored in each project directory at `.ticket-to-pr/learnings.md` (auto-gitignored). Failed tickets are especially valuable — the agent learns what not to do next time.
+
 ### Your First Ticket
 
 1. Click **"+ New"** on your Notion board
@@ -424,7 +444,7 @@ The review agent explores your codebase without modifying anything:
 
 - **Tools**: Read, Glob, Grep, Task
 - **Context**: Reads your project's `CLAUDE.md` for architecture rules. If `blockedFiles` are configured, the review agent factors those constraints into scoring.
-- **Output**: Ease score, confidence score, implementation spec, impact report, affected files, risks
+- **Output**: Ease score, confidence score, implementation spec, impact report, affected files, risks, **acceptance test cases**
 - **Budget**: $2.00 max, 25 turns max
 - **Typical cost**: $0.15 - $0.50
 
@@ -446,7 +466,7 @@ The review agent explores your codebase without modifying anything:
 
 ### Execute Agent (Write Access)
 
-The execute agent implements the code based on the spec:
+The execute agent implements the code based on the spec. When the review agent generates acceptance tests, the execute agent follows a **test-first workflow** — writing test files before implementation code.
 
 - **Tools**: Read, Glob, Grep, Edit, Write + limited Bash (git, build, test only)
 - **Dev access** (opt-in): When `devAccess` is enabled, additionally allows `npx tsx`, `node`, `npm run`, `npx vitest`, `npx jest`, `npx prisma`, `python`, and `curl` to localhost/127.0.0.1 only
@@ -459,14 +479,15 @@ The execute agent implements the code based on the spec:
 
 1. TicketToPR **fetches the latest** from `origin/<baseBranch>` (configurable per project, auto-detected by default)
 2. Creates branch `notion/{8-char-id}/{ticket-slug}` based on the fresh remote state
-3. Claude implements changes and makes atomic commits
-4. TicketToPR runs your build command (if configured)
-5. If `blockedFiles` patterns are configured, validates no off-limits files were touched
-6. Build passes + no blocked file violations: pushes branch to origin
-7. Creates a GitHub PR via `gh pr create` targeting the base branch (unless `skipPR` is enabled)
-8. PR URL written back to the Notion ticket
-9. Ticket moves to **PR Ready**
-10. Build fails or blocked file violation: no code is pushed, ticket moves to **Failed**
+3. Claude implements changes and makes atomic commits (test-first if acceptance tests were generated)
+4. **Diff review**: a lightweight Haiku agent reviews the diff against the spec — catches issues before push
+5. TicketToPR runs your build command (if configured)
+6. If `blockedFiles` patterns are configured, validates no off-limits files were touched
+7. All checks pass: pushes branch to origin
+8. Creates a GitHub PR via `gh pr create` targeting the base branch (unless `skipPR` is enabled)
+9. PR URL written back to the Notion ticket
+10. Ticket moves to **PR Ready**
+11. Any check fails (diff review, build, blocked files): no code is pushed, ticket moves to **Failed**
 
 ## Costs
 

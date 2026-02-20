@@ -158,12 +158,18 @@ export async function fetchTicketDetails(pageId: string): Promise<TicketDetails>
  * Write review results back to the ticket properties.
  */
 export async function writeReviewResults(pageId: string, results: ReviewOutput): Promise<void> {
+  // Build spec content, appending test cases if present
+  let specContent = results.spec;
+  if (results.testCases && results.testCases.length > 0) {
+    specContent += '\n\n## Acceptance Tests\n' + results.testCases.map(tc => `- ${tc}`).join('\n');
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const properties: Record<string, any> = {
     Ease: { number: results.easeScore },
     Confidence: { number: results.confidenceScore },
     Spec: {
-      rich_text: chunkRichText(results.spec),
+      rich_text: chunkRichText(specContent),
     },
     Impact: {
       rich_text: chunkRichText(

@@ -356,6 +356,6 @@ describe('ensureWorktreesIgnored', () => {
     writeFileSync(join(tmpDir, '.gitignore'), 'node_modules/');
     ensureWorktreesIgnored(tmpDir);
     const content = readFileSync(join(tmpDir, '.gitignore'), 'utf-8');
-    expect(content).toBe('node_modules/\n.worktrees/\n');
+    expect(content).toBe('node_modules/\n.worktrees/\n.ticket-to-pr/\n');
   });
 });

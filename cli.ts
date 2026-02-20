@@ -2,7 +2,8 @@ import { createInterface, type Interface } from 'node:readline';
 import { execSync } from 'node:child_process';
 import { readFileSync, existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { mask, shellEscape, writeEnvFile, updateProjectsFile, getDefaultBranch, parseEnvFile } from './lib/utils.js';
+import { mask, shellEscape, writeEnvFile, updateProjectsFile, getDefaultBranch, parseEnvFile, readLearnings } from './lib/utils.js';
+import { unlinkSync } from 'node:fs';
 import { getProjectNames, getProjectDir, getBaseBranch, getBlockedFiles, getSkipPR } from './lib/projects.js';
 import { CONFIG_DIR } from './lib/paths.js';
 import type { Client as NotionClient } from '@notionhq/client';
@@ -901,4 +902,88 @@ export async function runModel(args: string[]): Promise<void> {
     printStatus(true, 'Execute model', `${resolved.id}${resolved.alias !== resolved.id ? ` (${resolved.alias})` : ''}`);
   }
   console.log(`${DIM}Saved to .env.local. Takes effect on next poll cycle.${RESET}\n`);
+}
+
+// -- Learnings --
+
+export async function runLearnings(args: string[]): Promise<void> {
+  const projectNames = getProjectNames();
+
+  if (projectNames.length === 0) {
+    console.log(`${RED}No projects configured.${RESET} Run ${DIM}ticket-to-pr init${RESET} first.`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const subCmd = args[0]?.toLowerCase();
+  const projectArg = args[1];
+
+  // ticket-to-pr learnings clear <project>
+  if (subCmd === 'clear') {
+    if (!projectArg) {
+      console.log(`${RED}Usage: ticket-to-pr learnings clear <project>${RESET}`);
+      console.log(`${DIM}Projects: ${projectNames.join(', ')}${RESET}`);
+      process.exitCode = 1;
+      return;
+    }
+    const dir = getProjectDir(projectArg);
+    if (!dir) {
+      console.log(`${RED}Unknown project "${projectArg}".${RESET} Available: ${projectNames.join(', ')}`);
+      process.exitCode = 1;
+      return;
+    }
+    const learningsPath = join(dir, '.ticket-to-pr', 'learnings.md');
+    if (existsSync(learningsPath)) {
+      unlinkSync(learningsPath);
+      printStatus(true, `Cleared learnings for ${projectArg}`);
+    } else {
+      console.log(`${DIM}No learnings file found for ${projectArg}.${RESET}`);
+    }
+    return;
+  }
+
+  // ticket-to-pr learnings [project]
+  // If a project name is given, show only that project
+  const projectsToShow = subCmd && projectNames.includes(subCmd)
+    ? [subCmd]
+    : subCmd && getProjectDir(subCmd)
+      ? [subCmd]
+      : projectNames;
+
+  // If an unknown arg was passed
+  if (subCmd && subCmd !== 'clear' && !getProjectDir(subCmd) && !projectNames.some(p => p.toLowerCase() === subCmd)) {
+    console.log(`${RED}Unknown project or subcommand "${args[0]}".${RESET}`);
+    console.log(`\n${BOLD}Usage:${RESET}`);
+    console.log(`  ticket-to-pr learnings                   ${DIM}# view all projects${RESET}`);
+    console.log(`  ticket-to-pr learnings <project>          ${DIM}# view one project${RESET}`);
+    console.log(`  ticket-to-pr learnings clear <project>    ${DIM}# clear a project's learnings${RESET}`);
+    console.log(`\n${DIM}Projects: ${projectNames.join(', ')}${RESET}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  let anyFound = false;
+
+  for (const name of projectsToShow) {
+    const dir = getProjectDir(name);
+    if (!dir) continue;
+
+    const content = readLearnings(dir);
+    if (content) {
+      anyFound = true;
+      console.log(`\n${BOLD}${name}${RESET} ${DIM}${dir}/.ticket-to-pr/learnings.md${RESET}\n`);
+      console.log(content);
+    } else {
+      console.log(`\n${BOLD}${name}${RESET} ${DIM}no learnings yet${RESET}`);
+    }
+  }
+
+  if (!anyFound) {
+    console.log(`\n${DIM}Learnings accumulate automatically as tickets are processed.${RESET}`);
+  }
+
+  console.log(`\n${BOLD}Commands:${RESET}`);
+  console.log(`  ticket-to-pr learnings                   ${DIM}# view all projects${RESET}`);
+  console.log(`  ticket-to-pr learnings <project>          ${DIM}# view one project${RESET}`);
+  console.log(`  ticket-to-pr learnings clear <project>    ${DIM}# clear a project's learnings${RESET}\n`);
 }

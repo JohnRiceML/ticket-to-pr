@@ -2,8 +2,8 @@ import { readFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import { CONFIG, REVIEW_OUTPUT_SCHEMA, isPro, type LockEntry, type TicketDetails, type ReviewOutput } from './config.js';
-import { sleep, clamp, extractJsonFromOutput, shellEscape, extractNumber, loadEnv, parseEnvFile, createWorktree, removeWorktree, getDefaultBranch, validateNoBlockedFiles } from './lib/utils.js';
+import { CONFIG, REVIEW_OUTPUT_SCHEMA, DIFF_REVIEW_SCHEMA, isPro, type LockEntry, type TicketDetails, type ReviewOutput, type DiffReviewOutput } from './config.js';
+import { sleep, clamp, extractJsonFromOutput, shellEscape, extractNumber, loadEnv, parseEnvFile, createWorktree, removeWorktree, getDefaultBranch, validateNoBlockedFiles, readLearnings, appendLearning } from './lib/utils.js';
 import { getProjectDir, getProjectNames, getBuildCommand, getBaseBranch, getBlockedFiles, getSkipPR, getDevAccess, getEnvFile } from './lib/projects.js';
 import {
   fetchTicketsByStatus,
@@ -24,10 +24,12 @@ delete process.env.CLAUDECODE;
 
 // -- Subcommand routing --
 const subcommand = process.argv[2];
-if (subcommand === 'init' || subcommand === 'doctor' || subcommand === 'model') {
-  const { runInit, runDoctor, runModel } = await import('./cli.js');
+if (subcommand === 'init' || subcommand === 'doctor' || subcommand === 'model' || subcommand === 'learnings') {
+  const { runInit, runDoctor, runModel, runLearnings } = await import('./cli.js');
   if (subcommand === 'model') {
     await runModel(process.argv.slice(3));
+  } else if (subcommand === 'learnings') {
+    await runLearnings(process.argv.slice(3));
   } else {
     await (subcommand === 'init' ? runInit() : runDoctor());
   }
@@ -64,6 +66,7 @@ function log(color: string, label: string, msg: string): void {
 // -- Prompt loading (bundled with the package) --
 const reviewPrompt = readFileSync(join(PACKAGE_ROOT, 'prompts', 'review.md'), 'utf-8');
 const executePrompt = readFileSync(join(PACKAGE_ROOT, 'prompts', 'execute.md'), 'utf-8');
+const diffReviewPrompt = readFileSync(join(PACKAGE_ROOT, 'prompts', 'diff-review.md'), 'utf-8');
 
 // -- Agent Runner --
 
@@ -99,6 +102,11 @@ async function runReviewAgent(ticket: TicketDetails): Promise<void> {
       '',
       ...blockedFiles.map(p => `- \`${p}\``),
     );
+  }
+
+  const learnings = readLearnings(projectDir);
+  if (learnings) {
+    promptParts.push('', '## Project Learnings', 'These are patterns and lessons learned from previous work on this project:', '', learnings);
   }
 
   const prompt = promptParts.join('\n');
@@ -171,6 +179,7 @@ async function runReviewAgent(ticket: TicketDetails): Promise<void> {
     impactReport: String(parsed.impactReport ?? ''),
     affectedFiles: Array.isArray(parsed.affectedFiles) ? parsed.affectedFiles.map(String) : [],
     risks: parsed.risks ? String(parsed.risks) : undefined,
+    testCases: Array.isArray(parsed.testCases) ? parsed.testCases.map(String) : [],
   };
 
   await writeReviewResults(ticket.id, results);
@@ -187,7 +196,136 @@ async function runReviewAgent(ticket: TicketDetails): Promise<void> {
   ].join('\n');
   await addComment(ticket.id, comment);
 
+  appendLearning(projectDir, [
+    `**Review: ${ticket.title}**`,
+    `Ease: ${results.easeScore}/10, Confidence: ${results.confidenceScore}/10`,
+    `Affected files: ${results.affectedFiles.join(', ')}`,
+    results.risks ? `Risks: ${results.risks}` : '',
+  ].filter(Boolean).join('\n'));
+
   log(GREEN, 'REVIEW', `Done: ease=${results.easeScore} confidence=${results.confidenceScore} cost=$${cost.toFixed(2)}`);
+}
+
+async function runDiffReviewAgent(
+  worktreeDir: string,
+  baseBranch: string,
+  spec: string,
+  description: string,
+  affectedFiles: string[],
+): Promise<{ result: DiffReviewOutput; cost: number }> {
+  // Get the full diff
+  let diff = '';
+  try {
+    diff = execSync(
+      `git diff origin/${shellEscape(baseBranch)}...HEAD`,
+      { cwd: worktreeDir, stdio: 'pipe', maxBuffer: 10 * 1024 * 1024 },
+    ).toString();
+  } catch {
+    // If diff fails (e.g. no commits), treat as empty
+    diff = '';
+  }
+
+  // Nothing to review if no changes
+  if (!diff.trim()) {
+    return {
+      result: { approved: true, issues: [], summary: 'No changes to review' },
+      cost: 0,
+    };
+  }
+
+  // Truncate very large diffs to stay within budget
+  const maxDiffLength = 100_000;
+  const truncatedDiff = diff.length > maxDiffLength
+    ? diff.slice(0, maxDiffLength) + '\n\n... (diff truncated)'
+    : diff;
+
+  const prompt = [
+    diffReviewPrompt,
+    '',
+    '## Spec',
+    spec || '(no spec provided)',
+    '',
+    '## Ticket Description',
+    description || '(no description provided)',
+    '',
+    '## Affected Files (from review)',
+    affectedFiles.length > 0 ? affectedFiles.map(f => `- ${f}`).join('\n') : '(none listed)',
+    '',
+    '## Diff',
+    '```diff',
+    truncatedDiff,
+    '```',
+  ].join('\n');
+
+  const messages = query({
+    prompt,
+    options: {
+      model: CONFIG.DIFF_REVIEW_MODEL,
+      cwd: worktreeDir,
+      allowedTools: ['Read'],
+      maxTurns: CONFIG.DIFF_REVIEW_MAX_TURNS,
+      maxBudgetUsd: CONFIG.DIFF_REVIEW_BUDGET_USD,
+      permissionMode: 'bypassPermissions',
+      allowDangerouslySkipPermissions: true,
+      systemPrompt: { type: 'preset', preset: 'claude_code' },
+      outputFormat: {
+        type: 'json_schema',
+        schema: DIFF_REVIEW_SCHEMA as Record<string, unknown>,
+      },
+      stderr: (data: string) => {
+        if (data.trim()) log(DIM, 'STDERR', data.trim());
+      },
+    },
+  });
+
+  let output = '';
+  let structuredOutput: unknown = undefined;
+  let cost = 0;
+
+  for await (const message of messages) {
+    if (message.type === 'assistant') {
+      const content = message.message?.content;
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block.type === 'text') {
+            output = block.text;
+          }
+        }
+      } else if (typeof content === 'string') {
+        output = content;
+      }
+    }
+    if (message.type === 'result') {
+      cost = message.total_cost_usd ?? 0;
+      if (message.subtype !== 'success') {
+        throw new Error(`Diff review agent failed: ${message.subtype}`);
+      }
+      if ('structured_output' in message && message.structured_output != null) {
+        structuredOutput = message.structured_output;
+      }
+      if (message.result) {
+        output = message.result;
+      }
+    }
+  }
+
+  const parsed = (structuredOutput as Record<string, unknown> | undefined) ?? extractJsonFromOutput(output);
+  if (!parsed) {
+    // If we can't parse the output, default to approved to avoid blocking
+    return {
+      result: { approved: true, issues: [], summary: 'Diff review agent did not return structured output; defaulting to approved' },
+      cost,
+    };
+  }
+
+  return {
+    result: {
+      approved: Boolean(parsed.approved),
+      issues: Array.isArray(parsed.issues) ? parsed.issues.map(String) : [],
+      summary: String(parsed.summary ?? ''),
+    },
+    cost,
+  };
 }
 
 async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
@@ -245,6 +383,14 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
       ticket.bodyBlocks,
     ];
 
+    // Highlight acceptance tests if present in the spec
+    if (ticket.spec && ticket.spec.includes('## Acceptance Tests')) {
+      promptParts.push(
+        '',
+        '**IMPORTANT**: The spec above includes Acceptance Tests. Write test files FIRST, then implement code to make them pass. Run the tests to verify.',
+      );
+    }
+
     if (blockedFiles.length > 0) {
       promptParts.push(
         '',
@@ -272,6 +418,11 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
         '- Clean up any temporary scripts you create before your final commit',
         '- If you create test data, document it in a commit message so reviewers know',
       );
+    }
+
+    const learnings = readLearnings(projectDir);
+    if (learnings) {
+      promptParts.push('', '## Project Learnings', 'These are patterns and lessons learned from previous work on this project:', '', learnings);
     }
 
     const prompt = promptParts.join('\n');
@@ -340,6 +491,15 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
       // If branch doesn't exist or no commits, count is 0
       commitCount = 0;
     }
+
+    // Post-execution: diff review
+    log(YELLOW, 'REVIEW', 'Running diff review...');
+    const diffReview = await runDiffReviewAgent(worktreeDir, baseBranch, ticket.spec ?? '', ticket.description, []);
+    cost += diffReview.cost;
+    if (!diffReview.result.approved) {
+      throw new Error(`Diff review failed:\n${diffReview.result.issues.map(i => `  - ${i}`).join('\n')}`);
+    }
+    log(GREEN, 'REVIEW', `Diff review passed: ${diffReview.result.summary}`);
 
     // Post-execution: validate build
     const buildCmd = getBuildCommand(ticket.project);
@@ -430,6 +590,12 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
     ].join('\n');
     await addComment(ticket.id, comment);
 
+    appendLearning(projectDir, [
+      `**Execute: ${ticket.title}**`,
+      `Branch: ${branchName}, Commits: ${commitCount}`,
+      `Cost: $${cost.toFixed(2)}`,
+    ].join('\n'));
+
     log(GREEN, 'EXECUTE', `Done: branch=${branchName} cost=$${cost.toFixed(2)}${prUrl ? ` pr=${prUrl}` : ''}`);
   } catch (error) {
     // On failure, add failure audit trail comment
@@ -442,6 +608,10 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
       `Cost: $${cost.toFixed(2)} | Duration: ${duration}s`,
     ].join('\n');
     await addComment(ticket.id, comment);
+    appendLearning(projectDir, [
+      `**Failed execute: ${ticket.title}**`,
+      `Error: ${errMsg.slice(0, 200)}`,
+    ].join('\n'));
     throw error;
   } finally {
     // Always clean up the worktree
@@ -490,6 +660,17 @@ async function handleTicket(mode: 'review' | 'execute', ticket: TicketDetails): 
         `Duration: ${duration}s`,
       ].join('\n');
       await addComment(ticket.id, comment);
+    }
+
+    // Append failure learning (execute handles its own in runExecuteAgent catch)
+    if (mode === 'review') {
+      const projectDir = getProjectDir(ticket.project);
+      if (projectDir) {
+        appendLearning(projectDir, [
+          `**Failed review: ${ticket.title}**`,
+          `Error: ${errMsg.slice(0, 200)}`,
+        ].join('\n'));
+      }
     }
 
     try {

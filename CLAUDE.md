@@ -450,6 +450,9 @@ Replace `YOUR_USERNAME` and update the PATH to include your Node.js bin director
 | `doctor` | Diagnostic check — verifies environment, Notion connectivity, database schema (10 required properties), tools, and projects |
 | `model` | View current models and available options |
 | `model <review\|execute\|both> <model>` | Set the Claude model for review, execute, or both agents. Accepts aliases (`opus`, `sonnet`, `haiku`) or full model IDs. |
+| `learnings` | View accumulated project learnings from past agent runs |
+| `learnings <project>` | View learnings for a specific project |
+| `learnings clear <project>` | Clear a project's learnings file |
 | (none) | Continuous polling every 30s |
 | `--once` | Poll once, wait for agents to finish, exit |
 | `--dry-run` | Poll and log what would happen, don't run agents |
