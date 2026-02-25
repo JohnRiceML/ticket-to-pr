@@ -67,14 +67,17 @@ Execute         Poller picks up ticket. Claude creates branch, implements code,
 In Progress     Set immediately when execute agent starts working.
    |
    v
-PR Ready        Branch pushed to origin. PR created on GitHub. Ready for human review.
-                Branch name, cost, and PR link on ticket.
+Testing         Branch pushed to origin. PR created on GitHub.
+   |            QA checklist posted as comment. Ready for human review, merge, and testing.
+   v
+Done            Tester drags here after verifying in prod. Comments with feedback.
+                Poller reads comments, runs feedback retro, saves learnings.
 
 Failed          Agent errored. Error details in Impact field.
                 Drag back to Review or Execute to retry.
 ```
 
-The human decision point is between **Scored** and **Execute**. You always review the AI's assessment before it writes any code.
+The human decision points are between **Scored** and **Execute** (review AI's plan before coding) and between **Testing** and **Done** (review PR, merge, deploy, test, and leave feedback).
 
 ## Quick Start
 
@@ -178,10 +181,10 @@ Create a new ticket in your Notion board with these exact values:
    [BUILD] Build passed
    [GIT] Pushing branch: notion/abc12345/add-a-health-check-endpoint
    [PR] Created pull request: https://github.com/yourname/PeekABoo/pull/123
-   [EXECUTE] Ticket moved to PR Ready
+   [EXECUTE] Ticket moved to Testing
    ```
 5. **Verify in Notion** (refresh the page):
-   - Status: **PR Ready**
+   - Status: **Testing**
    - Branch: `notion/abc12345/add-a-health-check-endpoint` (actual ID will vary)
    - Cost: updated with execute cost (~$0.20-0.30 added, ~$0.40-0.55 total)
    - PR URL: populated with GitHub pull request link
@@ -233,7 +236,7 @@ More complex tickets will cost more, but should stay well within the budget limi
 | **"API token is invalid"** | Wrong Notion token or integration not connected | Check `.env.local`, reconnect integration in Notion ("..." -> Connections) |
 | **"Unknown project: PeekABoo"** | Project field doesn't match `projects.json` | Project name is case-sensitive — must match exactly |
 | **"Claude Code process exited with code 1"** | Claude CLI not authenticated | Run `claude "test"` manually to verify authentication |
-| **PR URL empty after PR Ready** | GitHub CLI not authenticated | Run `gh auth login` and follow browser authentication |
+| **PR URL empty after Testing** | GitHub CLI not authenticated | Run `gh auth login` and follow browser authentication |
 | **"Build validation failed"** | Build command not configured or project has existing build errors | Check `buildCommand` in `projects.json`, ensure `main` branch builds successfully |
 | **Ticket stuck in "In Progress"** | Agent crashed mid-execution | Check logs for errors, drag ticket back to Execute to retry |
 | **No output in terminal** | Wrong database ID or token | Verify `NOTION_DATABASE_ID` in `.env.local` matches your board URL |
@@ -248,7 +251,7 @@ Your test is successful when all of these are true:
 - Build validation passes
 - Branch is pushed to GitHub
 - PR is created automatically
-- Ticket moves from Execute -> In Progress -> PR Ready
+- Ticket moves from Execute -> In Progress -> Testing
 - PR URL is populated in the ticket
 - Code in the PR matches the ticket description
 - Total cost is reasonable (~$0.35-0.55 for this simple task)
@@ -284,11 +287,15 @@ Create a new **Board view** database in Notion. Then add these properties:
 | `Branch` | Text | Git branch name, written by execute agent |
 | `Cost` | Text | USD spent on the Claude run |
 | `PR URL` | URL | GitHub pull request link, written by execute agent |
+| `Reviewed At` | Date | Timestamp when review completed, written automatically |
+| `Executed At` | Date | Timestamp when execution completed (sort Testing by this) |
+| `Failed At` | Date | Timestamp when ticket failed, written automatically |
+| `Done At` | Date | Timestamp when feedback processed, written automatically |
 
-**Add these 7 status columns** (rename defaults + add new ones):
+**Add these 8 status columns** (rename defaults + add new ones):
 
 ```
-Backlog | Review | Scored | Execute | In Progress | PR Ready | Failed
+Backlog | Review | Scored | Execute | In Progress | Testing | Done | Failed
 ```
 
 **Connect the integration to the database**: Click "..." menu on the database page -> "Connections" -> search "TicketToPR" -> add it.
@@ -378,7 +385,7 @@ ticket-to-pr --dry-run --once
 6. Run `ticket-to-pr --once` and watch it score the ticket
 7. Check Notion — ticket should be in **Scored** with Ease, Confidence, Spec, Impact filled in
 8. Drag to **Execute**, run `ticket-to-pr --once` again
-9. Check Notion — ticket should be in **PR Ready** with Branch, Cost, and PR link filled in
+9. Check Notion — ticket should be in **Testing** with Branch, Cost, and PR link filled in
 
 ## Running as a Background Service (macOS)
 
@@ -493,13 +500,13 @@ Replace `YOUR_USERNAME` and update the PATH to include your Node.js bin director
 6. Build passes + no blocked file violations: bridge pushes branch to origin
 7. Bridge creates a GitHub PR via `gh pr create` (unless `skipPR` is enabled)
 8. PR URL written back to the ticket's `PR` property
-9. Ticket moves to PR Ready with branch name, cost, and PR link
+9. Ticket moves to Testing with branch name, cost, and PR link
 10. Build fails or blocked file violation: ticket -> Failed, no code is pushed
 11. Worktree is always cleaned up when done (main working directory is never touched)
 
 Multiple execute agents can safely target the same project concurrently because each runs in its own worktree.
 
-**PR creation is best-effort** — if `gh` isn't authenticated or the push target has no GitHub remote, the ticket still moves to PR Ready with the branch name. You can always create a PR manually.
+**PR creation is best-effort** — if `gh` isn't authenticated or the push target has no GitHub remote, the ticket still moves to Testing with the branch name. You can always create a PR manually.
 
 ## Configuration Reference
 
@@ -548,6 +555,9 @@ ticket-to-pr/
   prompts/
     review.md           # Review agent system prompt with scoring rubric
     execute.md          # Execute agent system prompt with safety rules
+    diff-review.md      # Post-execute diff review prompt
+    retro.md            # Post-execute retrospective prompt
+    feedback.md         # Human feedback processing prompt
   .env.local            # NOTION_TOKEN, NOTION_DATABASE_ID, model overrides (git-ignored)
   package.json          # Dependencies: @anthropic-ai/claude-agent-sdk, @notionhq/client, vitest
   tsconfig.json         # ESNext + NodeNext
@@ -571,6 +581,39 @@ ticket-to-pr/
 
 No other code changes needed.
 
+## Human Feedback Loop
+
+TicketToPR learns from human feedback on both successful and failed tickets. This lets non-technical team members (PMs, founders, QA) test results and give feedback without touching code.
+
+### How it works
+
+1. Ticket lands in **Testing** with PR link — **TicketToPR posts a QA checklist** as a comment, generated from the spec's acceptance tests
+2. **Dev reviews and merges** the PR, deploys to prod
+4. **Tester follows the checklist** and comments on the ticket with what they found (e.g. "works great", "login broke", "wrong color", "missing the mobile view")
+5. **Tester drags the ticket**:
+   - To **Done** if it works
+   - To **Failed** if something's wrong (and comment what happened)
+6. **TicketToPR reads the comments**, runs a feedback retro agent, and saves learnings to project memory
+7. **Future tickets benefit** — the learnings are injected into agent prompts so the same mistakes don't repeat
+
+### What to comment
+
+Any feedback is useful. Examples:
+- "Works perfectly, shipped to prod" → system notes this approach worked
+- "The button is in the wrong place, should be in the header not the sidebar" → `[preference]` learning saved
+- "This broke the checkout flow" → `[bug]` learning saved about side effects
+- "Took too long to load after this change" → `[quality]` learning saved about performance
+
+### Feedback on Failed tickets
+
+When a ticket fails (agent error or build failure), the system already logs the technical error. But human comments on Failed tickets add context the agent can't see:
+- "This failed because the API endpoint changed last week" → agent learns about the dependency
+- "Wrong approach — we use Redis for caching here, not in-memory" → agent learns the pattern
+
+### Deduplication
+
+Each ticket is processed for feedback only once. A marker comment ("Feedback processed") is posted after processing. If TicketToPR restarts, it checks for this marker before re-processing.
+
 ## Error Handling
 
 | Failure | What Happens |
@@ -581,7 +624,7 @@ No other code changes needed.
 | Execute agent fails | Worktree cleaned up, ticket -> Failed |
 | Build validation fails | Ticket -> Failed, branch kept locally for inspection |
 | Push fails | Ticket -> Failed, branch remains local |
-| PR creation fails | Ticket still moves to PR Ready (best-effort), logged as warning |
+| PR creation fails | Ticket still moves to Testing (best-effort), logged as warning |
 | Duplicate poll trigger | Skipped (in-memory lock per ticket ID) |
 | Agent hangs > 30 min | Lock force-released, ticket -> Failed |
 
@@ -617,7 +660,7 @@ No other code changes needed.
 - Verify with `gh auth status` — should show "Logged in to github.com"
 - The project repo must have a GitHub `origin` remote
 - Check logs for `[PR] Failed to create PR:` messages
-- PR creation is best-effort — the ticket still moves to PR Ready without it
+- PR creation is best-effort — the ticket still moves to Testing without it
 
 **launchd service not starting**
 - Validate plist: `plutil -lint ~/Library/LaunchAgents/com.ticket-to-pr.plist`

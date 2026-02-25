@@ -3,7 +3,7 @@ import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { CONFIG, REVIEW_OUTPUT_SCHEMA, DIFF_REVIEW_SCHEMA, isPro, type LockEntry, type TicketDetails, type ReviewOutput, type DiffReviewOutput } from './config.js';
-import { sleep, clamp, extractJsonFromOutput, shellEscape, extractNumber, loadEnv, parseEnvFile, createWorktree, removeWorktree, getDefaultBranch, validateNoBlockedFiles, readLearnings, appendLearning } from './lib/utils.js';
+import { sleep, clamp, extractJsonFromOutput, shellEscape, loadEnv, parseEnvFile, createWorktree, removeWorktree, getDefaultBranch, validateNoBlockedFiles, readLearnings, appendLearning } from './lib/utils.js';
 import { getProjectDir, getProjectNames, getBuildCommand, getBaseBranch, getBlockedFiles, getSkipPR, getDevAccess, getEnvFile } from './lib/projects.js';
 import {
   fetchTicketsByStatus,
@@ -13,6 +13,10 @@ import {
   moveTicketStatus,
   writeFailure,
   addComment,
+  fetchComments,
+  hasFeedbackMarker,
+  hasTestingMarker,
+  trySetDate,
 } from './lib/notion.js';
 import { PACKAGE_ROOT, CONFIG_DIR } from './lib/paths.js';
 
@@ -43,6 +47,8 @@ const ONCE = args.includes('--once');
 
 // -- State --
 const activeLocks = new Map<string, LockEntry>();
+const feedbackProcessed = new Set<string>();
+const testingNotified = new Set<string>();
 let shuttingDown = false;
 let activeAgentCount = 0;
 
@@ -68,6 +74,7 @@ const reviewPrompt = readFileSync(join(PACKAGE_ROOT, 'prompts', 'review.md'), 'u
 const executePrompt = readFileSync(join(PACKAGE_ROOT, 'prompts', 'execute.md'), 'utf-8');
 const diffReviewPrompt = readFileSync(join(PACKAGE_ROOT, 'prompts', 'diff-review.md'), 'utf-8');
 const retroPrompt = readFileSync(join(PACKAGE_ROOT, 'prompts', 'retro.md'), 'utf-8');
+const feedbackPrompt = readFileSync(join(PACKAGE_ROOT, 'prompts', 'feedback.md'), 'utf-8');
 
 // -- Agent Runner --
 
@@ -442,6 +449,205 @@ async function runRetroAgent(
   }
 }
 
+async function postTestChecklist(ticket: TicketDetails): Promise<void> {
+  log(CYAN, 'TESTING', `Posting test checklist for "${ticket.title}"`);
+
+  try {
+    // Cross-session dedup: check if we already posted a testing checklist
+    const alreadyPosted = await hasTestingMarker(ticket.id);
+    if (alreadyPosted) {
+      log(DIM, 'TESTING', `Checklist already posted for "${ticket.title}", skipping`);
+      return;
+    }
+
+    // Extract acceptance tests from the spec
+    const spec = ticket.spec ?? '';
+    const description = ticket.description ?? '';
+    let checklist: string[] = [];
+
+    // Parse acceptance tests from spec (format: "## Acceptance Tests\n- GIVEN/WHEN/THEN...")
+    const acceptanceMatch = spec.match(/## Acceptance Tests\n([\s\S]*?)(?:\n##|$)/);
+    if (acceptanceMatch) {
+      checklist = acceptanceMatch[1]
+        .split('\n')
+        .filter(line => line.trim().startsWith('-'))
+        .map(line => {
+          // Convert GIVEN/WHEN/THEN to plain language
+          let text = line.replace(/^-\s*/, '').trim();
+          text = text
+            .replace(/^GIVEN\s+/i, 'Start with: ')
+            .replace(/\s*WHEN\s+/i, ' → Do: ')
+            .replace(/\s*THEN\s+/i, ' → Expect: ');
+          return text;
+        });
+    }
+
+    // If no acceptance tests, generate a basic checklist from description
+    if (checklist.length === 0) {
+      checklist = [
+        `Verify the change described in the ticket works: "${description.slice(0, 200)}"`,
+        'Check that nothing else looks broken',
+        'Comment on this ticket with what you found',
+      ];
+    }
+
+    // Build the comment
+    const checklistText = checklist.map((item, i) => `${i + 1}. ${item}`).join('\n');
+    const comment = [
+      `🧪 Ready for Testing`,
+      '',
+      `This ticket has been deployed. Please test the following:`,
+      '',
+      checklistText,
+      '',
+      `When done, comment with what you found and drag to:`,
+      `→ "Done" if it works`,
+      `→ "Failed" if something's wrong (please describe what happened)`,
+    ].join('\n');
+
+    await addComment(ticket.id, comment);
+    // Executed At is already set when the ticket lands here — no separate timestamp needed
+
+    log(GREEN, 'TESTING', `Posted checklist for "${ticket.title}" (${checklist.length} items)`);
+  } catch (e) {
+    log(YELLOW, 'TESTING', `Failed to post checklist: ${e instanceof Error ? e.message : e}`);
+  }
+}
+
+async function runFeedbackRetro(ticket: TicketDetails, status: string): Promise<void> {
+  const projectDir = getProjectDir(ticket.project);
+  if (!projectDir) return;
+
+  const statusLabel = status === CONFIG.COLUMNS.FAILED ? 'failed' : 'done';
+  log(CYAN, 'FEEDBACK', `Processing feedback for "${ticket.title}" (${statusLabel})`);
+
+  try {
+    // Cross-session dedup: check if already processed
+    const alreadyProcessed = await hasFeedbackMarker(ticket.id);
+    if (alreadyProcessed) {
+      log(DIM, 'FEEDBACK', `Already processed, skipping "${ticket.title}"`);
+      return;
+    }
+
+    // Read human comments from the ticket
+    const comments = await fetchComments(ticket.id);
+    if (comments.length === 0) {
+      log(DIM, 'FEEDBACK', 'No human comments found, skipping');
+      // Only mark Done tickets as processed (Failed might get retried with comments later)
+      if (status === CONFIG.COLUMNS.DONE) {
+        await addComment(ticket.id, '🔄 Feedback processed (no human comments found)');
+      }
+      return;
+    }
+
+    const existingLearnings = readLearnings(projectDir);
+
+    // Build feedback prompt with status context
+    const parts = [
+      feedbackPrompt,
+      '',
+      `## Ticket: ${ticket.title}`,
+      `## Status: ${status}`,
+      '',
+      '**Description**:',
+      ticket.description,
+      '',
+      '**Spec**:',
+      ticket.spec ?? '(none)',
+      '',
+      '**Impact/Error info**:',
+      ticket.impact ?? '(none)',
+    ];
+
+    if (status === CONFIG.COLUMNS.FAILED) {
+      parts.push(
+        '',
+        '## Context',
+        'This ticket FAILED. The human comments below describe what went wrong from the user\'s perspective (not just the agent error). Extract learnings about what the AI should do differently.',
+      );
+    } else {
+      parts.push(
+        '',
+        '## Context',
+        'This ticket was completed and the human tested the result. Their comments describe what they found.',
+      );
+    }
+
+    parts.push(
+      '',
+      '## Human Feedback',
+      ...comments.map(c => `**${c.author}** (${c.createdTime}):\n> ${c.text}`),
+    );
+
+    if (existingLearnings) {
+      parts.push('', '## Existing Learnings (do not repeat these)', existingLearnings);
+    }
+
+    const prompt = parts.join('\n');
+
+    const messages = query({
+      prompt,
+      options: {
+        model: CONFIG.DIFF_REVIEW_MODEL, // Haiku — cheap and fast
+        cwd: projectDir,
+        allowedTools: [],
+        maxTurns: 3,
+        maxBudgetUsd: 0.10,
+        permissionMode: 'bypassPermissions',
+        allowDangerouslySkipPermissions: true,
+        systemPrompt: { type: 'preset', preset: 'claude_code' },
+        stderr: () => {},
+      },
+    });
+
+    let output = '';
+
+    for await (const message of messages) {
+      if (message.type === 'assistant') {
+        const content = message.message?.content;
+        if (Array.isArray(content)) {
+          for (const block of content) {
+            if (block.type === 'text') output = block.text;
+          }
+        } else if (typeof content === 'string') {
+          output = content;
+        }
+      }
+      if (message.type === 'result') {
+        if ('result' in message && message.result) {
+          output = message.result as string;
+        }
+      }
+    }
+
+    // Save learnings if meaningful
+    const trimmed = output.trim();
+    if (trimmed && !trimmed.toLowerCase().includes('no new learnings')) {
+      const tag = status === CONFIG.COLUMNS.FAILED ? 'Feedback (failed)' : 'Feedback';
+      appendLearning(projectDir, `**${tag}: ${ticket.title}**\n${trimmed}`);
+      const count = trimmed.split('\n').filter(l => l.startsWith('-') || l.startsWith('*')).length;
+      log(GREEN, 'FEEDBACK', `Saved ${count} learnings from human feedback`);
+    } else {
+      log(DIM, 'FEEDBACK', 'No new learnings from feedback');
+    }
+
+    // Mark as processed with a summary comment
+    const feedbackSummary = comments.map(c => `- ${c.author}: "${c.text.slice(0, 100)}${c.text.length > 100 ? '...' : ''}"`).join('\n');
+    const learningNote = trimmed && !trimmed.toLowerCase().includes('no new learnings')
+      ? 'Learnings saved to project memory.'
+      : 'No new learnings extracted.';
+    await addComment(ticket.id, `🔄 Feedback processed\n\nComments analyzed:\n${feedbackSummary}\n\n${learningNote}`);
+    if (status === CONFIG.COLUMNS.DONE) {
+      await trySetDate(ticket.id, 'Done At');
+    }
+
+    log(GREEN, 'FEEDBACK', `Done processing feedback for "${ticket.title}"`);
+  } catch (e) {
+    // Feedback is best-effort
+    log(YELLOW, 'FEEDBACK', `Failed: ${e instanceof Error ? e.message : e}`);
+  }
+}
+
 async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
   const projectDir = getProjectDir(ticket.project);
   if (!projectDir) {
@@ -674,7 +880,7 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
           `[View in Notion](https://www.notion.so/${ticket.id.replace(/-/g, '')})`,
           '',
           '---',
-          `Cost: $${cost.toFixed(2)} | Review: Ease ${extractNumber(ticket, 'ease')}/10, Confidence ${extractNumber(ticket, 'confidence')}/10`,
+          `Cost: $${cost.toFixed(2)} | Review: Ease ${ticket.ease ?? '?'}/10, Confidence ${ticket.confidence ?? '?'}/10`,
         ].join('\n');
 
         const prResult = execSync(
@@ -691,7 +897,7 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
 
     // Update Notion
     await writeExecutionResults(ticket.id, { branch: branchName, cost, prUrl });
-    await moveTicketStatus(ticket.id, CONFIG.COLUMNS.DONE);
+    await moveTicketStatus(ticket.id, CONFIG.COLUMNS.TESTING);
 
     const duration = Math.round((Date.now() - startTime) / 1000);
 
@@ -820,14 +1026,23 @@ async function poll(): Promise<void> {
     // Clear stale locks
     clearStaleLocks();
 
-    // Fetch tickets in Review and Execute columns
-    const [reviewTickets, executeTickets] = await Promise.all([
+    // Fetch tickets in Review, Execute, Testing, Done, and Failed columns
+    const [reviewTickets, executeTickets, testingTickets, doneTickets, failedTickets] = await Promise.all([
       fetchTicketsByStatus(CONFIG.COLUMNS.REVIEW),
       fetchTicketsByStatus(CONFIG.COLUMNS.EXECUTE),
+      fetchTicketsByStatus(CONFIG.COLUMNS.TESTING),
+      fetchTicketsByStatus(CONFIG.COLUMNS.DONE),
+      fetchTicketsByStatus(CONFIG.COLUMNS.FAILED),
     ]);
 
     const pendingReview = reviewTickets.filter((t) => !activeLocks.has(t.id));
     const pendingExecute = executeTickets.filter((t) => !activeLocks.has(t.id));
+    const pendingTesting = testingTickets.filter((t) => !testingNotified.has(t.id));
+    // Feedback candidates: Done tickets + Failed tickets (both can have human comments)
+    const pendingFeedback = [
+      ...doneTickets.map(t => ({ ...t, feedbackStatus: CONFIG.COLUMNS.DONE })),
+      ...failedTickets.map(t => ({ ...t, feedbackStatus: CONFIG.COLUMNS.FAILED })),
+    ].filter((t) => !feedbackProcessed.has(t.id));
 
     if (pendingReview.length > 0) {
       log(CYAN, 'POLL', `Found ${pendingReview.length} ticket(s) to review`);
@@ -835,7 +1050,13 @@ async function poll(): Promise<void> {
     if (pendingExecute.length > 0) {
       log(MAGENTA, 'POLL', `Found ${pendingExecute.length} ticket(s) to execute`);
     }
-    if (pendingReview.length === 0 && pendingExecute.length === 0) {
+    if (pendingTesting.length > 0) {
+      log(YELLOW, 'POLL', `Found ${pendingTesting.length} ticket(s) needing test checklists`);
+    }
+    if (pendingFeedback.length > 0) {
+      log(GREEN, 'POLL', `Found ${pendingFeedback.length} ticket(s) to check for feedback`);
+    }
+    if (pendingReview.length === 0 && pendingExecute.length === 0 && pendingTesting.length === 0 && pendingFeedback.length === 0) {
       log(DIM, 'POLL', 'No tickets to process');
     }
 
@@ -866,6 +1087,26 @@ async function poll(): Promise<void> {
       const details = await fetchTicketDetails(ticket.id);
       handleTicket(mode, details).catch((err) => {
         log(RED, 'UNHANDLED', `Unexpected error in ${mode} for "${details.title}": ${err instanceof Error ? err.message : err}`);
+      });
+    }
+
+    // Post test checklists for Testing tickets (lightweight, no AI agent)
+    for (const ticket of pendingTesting) {
+      if (shuttingDown) break;
+      testingNotified.add(ticket.id);
+      const details = await fetchTicketDetails(ticket.id);
+      postTestChecklist(details).catch((err) => {
+        log(YELLOW, 'TESTING', `Error posting checklist for "${details.title}": ${err instanceof Error ? err.message : err}`);
+      });
+    }
+
+    // Process feedback for Done and Failed tickets (lightweight, doesn't count toward concurrency)
+    for (const ticket of pendingFeedback) {
+      if (shuttingDown) break;
+      feedbackProcessed.add(ticket.id);
+      const details = await fetchTicketDetails(ticket.id);
+      runFeedbackRetro(details, ticket.feedbackStatus).catch((err) => {
+        log(YELLOW, 'FEEDBACK', `Error processing feedback for "${details.title}": ${err instanceof Error ? err.message : err}`);
       });
     }
   } catch (error) {

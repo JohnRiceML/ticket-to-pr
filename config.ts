@@ -48,7 +48,8 @@ export const CONFIG = {
     SCORED: 'Scored',
     EXECUTE: 'Execute',
     IN_PROGRESS: 'In Progress',
-    DONE: 'PR Ready',
+    TESTING: 'Testing',
+    DONE: 'Done',
     FAILED: 'Failed',
   },
 
@@ -125,6 +126,8 @@ export interface TicketDetails extends NotionTicket {
   bodyBlocks: string;
   spec?: string;
   impact?: string;
+  ease?: number;
+  confidence?: number;
 }
 
 export interface ReviewOutput {

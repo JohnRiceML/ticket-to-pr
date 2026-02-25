@@ -40,6 +40,11 @@ function extractRichText(page: PageObjectResponse, name: string): string {
   return prop?.rich_text ? extractPlainText(prop.rich_text) : '';
 }
 
+function extractNumber(page: PageObjectResponse, name: string): number | undefined {
+  const prop = getProperty(page, name) as { number?: number | null } | undefined;
+  return prop?.number ?? undefined;
+}
+
 function extractSelect(page: PageObjectResponse, name: string): string {
   const prop = getProperty(page, name) as { select?: { name: string } | null } | undefined;
   return prop?.select?.name ?? '';
@@ -111,6 +116,28 @@ export function blockToMarkdown(block: BlockObjectResponse): string {
   }
 }
 
+function nowISO(): string {
+  return new Date().toISOString();
+}
+
+function dateProperty(iso: string): { date: { start: string } } {
+  return { date: { start: iso } };
+}
+
+/**
+ * Set a date property on a page (best-effort — skips silently if property doesn't exist).
+ */
+export async function trySetDate(pageId: string, propertyName: string): Promise<void> {
+  try {
+    await notion().pages.update({
+      page_id: pageId,
+      properties: { [propertyName]: dateProperty(nowISO()) },
+    });
+  } catch {
+    // Property might not exist yet — skip silently
+  }
+}
+
 // -- Exported Functions --
 
 /**
@@ -151,6 +178,8 @@ export async function fetchTicketDetails(pageId: string): Promise<TicketDetails>
     bodyBlocks,
     spec: extractRichText(page, 'Spec') || undefined,
     impact: extractRichText(page, 'Impact') || undefined,
+    ease: extractNumber(page, 'Ease'),
+    confidence: extractNumber(page, 'Confidence'),
   };
 }
 
@@ -176,15 +205,21 @@ export async function writeReviewResults(pageId: string, results: ReviewOutput):
         `${results.impactReport}\n\nFiles: ${results.affectedFiles.join(', ')}${results.risks ? `\n\nRisks: ${results.risks}` : ''}`,
       ),
     },
+    'Reviewed At': dateProperty(nowISO()),
   };
 
   try {
     await notion().pages.update({ page_id: pageId, properties });
   } catch (e) {
-    // If Confidence property doesn't exist yet, retry without it
     const errMsg = String(e);
+    // If a property doesn't exist yet, retry without it
     if (errMsg.includes('Confidence')) {
       delete properties.Confidence;
+    }
+    if (errMsg.includes('Reviewed At')) {
+      delete properties['Reviewed At'];
+    }
+    if (errMsg.includes('Confidence') || errMsg.includes('Reviewed At')) {
       await notion().pages.update({ page_id: pageId, properties });
     } else {
       throw e;
@@ -207,6 +242,7 @@ export async function writeExecutionResults(
     Cost: {
       rich_text: [{ text: { content: `$${(Math.round(results.cost * 100) / 100).toFixed(2)}` } }],
     },
+    'Executed At': dateProperty(nowISO()),
   };
 
   if (results.prUrl) {
@@ -215,7 +251,17 @@ export async function writeExecutionResults(
     };
   }
 
-  await notion().pages.update({ page_id: pageId, properties });
+  try {
+    await notion().pages.update({ page_id: pageId, properties });
+  } catch (e) {
+    const errMsg = String(e);
+    if (errMsg.includes('Executed At')) {
+      delete properties['Executed At'];
+      await notion().pages.update({ page_id: pageId, properties });
+    } else {
+      throw e;
+    }
+  }
 }
 
 /**
@@ -234,15 +280,26 @@ export async function moveTicketStatus(pageId: string, newStatus: string): Promi
  * Write error details and move ticket to Failed.
  */
 export async function writeFailure(pageId: string, error: string): Promise<void> {
-  await notion().pages.update({
-    page_id: pageId,
-    properties: {
-      Status: { status: { name: CONFIG.COLUMNS.FAILED } },
-      Impact: {
-        rich_text: chunkRichText(`ERROR: ${error}`),
-      },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const properties: Record<string, any> = {
+    Status: { status: { name: CONFIG.COLUMNS.FAILED } },
+    Impact: {
+      rich_text: chunkRichText(`ERROR: ${error}`),
     },
-  });
+    'Failed At': dateProperty(nowISO()),
+  };
+
+  try {
+    await notion().pages.update({ page_id: pageId, properties });
+  } catch (e) {
+    const errMsg = String(e);
+    if (errMsg.includes('Failed At')) {
+      delete properties['Failed At'];
+      await notion().pages.update({ page_id: pageId, properties });
+    } else {
+      throw e;
+    }
+  }
 }
 
 /**
@@ -259,6 +316,69 @@ export async function addComment(pageId: string, text: string): Promise<void> {
     // Best-effort: log but don't throw
     console.warn(`[NOTION] Failed to add comment to ${pageId}:`, e);
   }
+}
+
+/**
+ * Fetch all comments on a Notion page.
+ * Returns human comments (filters out bot-authored comments from this integration).
+ */
+export async function fetchComments(pageId: string): Promise<Array<{ author: string; text: string; createdTime: string }>> {
+  try {
+    const response = await notion().comments.list({ block_id: pageId });
+    const comments: Array<{ author: string; text: string; createdTime: string }> = [];
+
+    for (const comment of response.results) {
+      // Skip bot-authored comments (our own audit trail)
+      const createdBy = comment.created_by as { type?: string; name?: string; id?: string };
+      if (createdBy?.type === 'bot') continue;
+
+      const text = 'rich_text' in comment
+        ? extractPlainText(comment.rich_text as RichTextItemResponse[])
+        : '';
+
+      if (!text.trim()) continue;
+
+      comments.push({
+        author: createdBy?.name || 'Unknown',
+        text: text.trim(),
+        createdTime: comment.created_time,
+      });
+    }
+
+    return comments;
+  } catch (e) {
+    console.warn(`[NOTION] Failed to fetch comments for ${pageId}:`, e);
+    return [];
+  }
+}
+
+/**
+ * Check if a ticket already has a specific bot marker comment.
+ * Used for cross-session deduplication.
+ */
+async function hasBotMarker(pageId: string, marker: string): Promise<boolean> {
+  try {
+    const response = await notion().comments.list({ block_id: pageId });
+    for (const comment of response.results) {
+      const createdBy = comment.created_by as { type?: string };
+      if (createdBy?.type !== 'bot') continue;
+      const text = 'rich_text' in comment
+        ? extractPlainText(comment.rich_text as RichTextItemResponse[])
+        : '';
+      if (text.includes(marker)) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+export function hasFeedbackMarker(pageId: string): Promise<boolean> {
+  return hasBotMarker(pageId, 'Feedback processed');
+}
+
+export function hasTestingMarker(pageId: string): Promise<boolean> {
+  return hasBotMarker(pageId, 'Ready for Testing');
 }
 
 export function truncate(str: string, maxLen: number): string {
