@@ -56,7 +56,7 @@ TicketToPR clears that pile. Toss tickets on your Notion board, drag to Review, 
 
 ### The Board
 
-TicketToPR uses a Notion board with 7 columns. Each column represents a stage in the pipeline:
+TicketToPR uses a Notion board with 9 columns. Each column represents a stage in the pipeline:
 
 ```
 Backlog          No automation. Park ideas here.
@@ -74,8 +74,11 @@ Execute          Claude creates branch, implements code, commits changes.
 In Progress      Set automatically when the execute agent starts working.
    |
    v
-Testing          Branch pushed. PR created. QA checklist posted as comment.
-   |             Dev reviews PR, merges, deploys. Tester verifies in prod.
+PR Ready         Branch pushed. PR created on GitHub.
+   |             Dev reviews PR, merges, and deploys to prod.
+   v
+Testing          Dev drags here after deploying. QA checklist posted as comment.
+   |             Co-founder / tester verifies in prod.
    v
 Done             Tester drags here after verifying. Comments with feedback.
                  TicketToPR reads comments, extracts learnings, saves to project memory.
@@ -84,7 +87,7 @@ Failed           Agent errored. Error details on ticket.
                  Drag back to Review or Execute to retry.
 ```
 
-The rhythm is **you, AI, you, AI, AI, you, AI** — human touchpoints at Review, Execute, and Done. You're always the decision-maker. The AI is always the worker.
+The rhythm is **you, AI, you, AI, AI, you, you, AI** — human touchpoints at Review, Execute, PR Ready, Testing, and Done. You're always the decision-maker. The AI is always the worker.
 
 ### What It's Great At
 
@@ -169,14 +172,15 @@ Create a new **Board view** database in Notion with these properties:
 | `Cost` | Text | USD spent on the Claude run |
 | `PR URL` | URL | GitHub pull request link (written by AI) |
 | `Reviewed At` | Date | When review completed (sort Scored by this) |
-| `Executed At` | Date | When execution completed (sort Testing by this) |
+| `Executed At` | Date | When execution completed (sort PR Ready by this) |
+| `Testing At` | Date | When QA checklist posted (sort Testing by this) |
 | `Failed At` | Date | When ticket failed (sort Failed by this) |
 | `Done At` | Date | When feedback processed (sort Done by this) |
 
-Add these **8 status columns**:
+Add these **9 status columns**:
 
 ```
-Backlog | Review | Scored | Execute | In Progress | Testing | Done | Failed
+Backlog | Review | Scored | Execute | In Progress | PR Ready | Testing | Done | Failed
 ```
 
 Connect the integration: **"..." menu** on the database page -> **Connections** -> search **TicketToPR** -> add it.
@@ -388,7 +392,7 @@ Learnings are stored in each project directory at `.ticket-to-pr/learnings.md` (
 6. Run `ticket-to-pr --once` and watch it score the ticket
 7. Check Notion — ticket should be in **Scored** with Ease, Confidence, Spec, Impact filled in
 8. Drag to **Execute**, run `ticket-to-pr --once` again
-9. Check Notion — ticket should be in **Testing** with Branch, Cost, and PR link
+9. Check Notion — ticket should be in **PR Ready** with Branch, Cost, and PR link
 
 Typical cost for this test: **~$0.49** ($0.22 review + $0.27 execute).
 
@@ -493,7 +497,7 @@ The execute agent implements the code based on the spec. When the review agent g
 7. All checks pass: pushes branch to origin
 8. Creates a GitHub PR via `gh pr create` targeting the base branch (unless `skipPR` is enabled)
 9. PR URL written back to the Notion ticket
-10. Ticket moves to **Testing**
+10. Ticket moves to **PR Ready**
 11. Any check fails (diff review, build, blocked files): no code is pushed, ticket moves to **Failed**
 
 ## Human Feedback Loop
@@ -502,7 +506,8 @@ Non-technical team members can test results and give feedback directly in Notion
 
 ### Workflow for testers (PMs, founders, QA)
 
-1. A ticket lands in **Testing** with a QA checklist comment — the dev reviews and merges the PR, deploys
+1. A ticket lands in **PR Ready** — the dev reviews and merges the PR, deploys to prod, then drags to **Testing**
+2. TicketToPR posts a QA checklist comment
 4. Test the change and **comment on the ticket** with what you found
 5. **Drag the ticket**:
    - To **Done** if it works
@@ -649,7 +654,7 @@ Add to `projects.json` (or re-run `ticket-to-pr init`):
 | Build validation fails | Ticket -> Failed with command, directory, and build output (up to 500 chars) |
 | Blocked file violation | Ticket -> Failed with list of matched files and patterns. No code is pushed. |
 | Push fails | Ticket -> Failed, branch remains local |
-| PR creation fails | Ticket still moves to Testing (best-effort) |
+| PR creation fails | Ticket still moves to PR Ready (best-effort) |
 | Duplicate poll trigger | Skipped via in-memory lock per ticket ID |
 | Agent hangs > 30 min | Lock force-released, ticket -> Failed |
 
@@ -708,7 +713,7 @@ Add to `projects.json` (or re-run `ticket-to-pr init`):
 - Authenticate: `gh auth login`
 - Verify: `gh auth status`
 - The project must have a GitHub `origin` remote
-- PR creation is best-effort — the ticket still moves to Testing without it
+- PR creation is best-effort — the ticket still moves to PR Ready without it
 
 </details>
 

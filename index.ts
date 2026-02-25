@@ -506,7 +506,7 @@ async function postTestChecklist(ticket: TicketDetails): Promise<void> {
     ].join('\n');
 
     await addComment(ticket.id, comment);
-    // Executed At is already set when the ticket lands here — no separate timestamp needed
+    await trySetDate(ticket.id, 'Testing At');
 
     log(GREEN, 'TESTING', `Posted checklist for "${ticket.title}" (${checklist.length} items)`);
   } catch (e) {
@@ -897,7 +897,7 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
 
     // Update Notion
     await writeExecutionResults(ticket.id, { branch: branchName, cost, prUrl });
-    await moveTicketStatus(ticket.id, CONFIG.COLUMNS.TESTING);
+    await moveTicketStatus(ticket.id, CONFIG.COLUMNS.PR_READY);
 
     const duration = Math.round((Date.now() - startTime) / 1000);
 

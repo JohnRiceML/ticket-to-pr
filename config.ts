@@ -48,6 +48,7 @@ export const CONFIG = {
     SCORED: 'Scored',
     EXECUTE: 'Execute',
     IN_PROGRESS: 'In Progress',
+    PR_READY: 'PR Ready',
     TESTING: 'Testing',
     DONE: 'Done',
     FAILED: 'Failed',
