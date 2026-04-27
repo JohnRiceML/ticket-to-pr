@@ -215,6 +215,36 @@ export function _resetDefaultBranchCache(): void {
   defaultBranchCache.clear();
 }
 
+// -- GitHub URL helpers --
+
+/**
+ * Parse the origin remote URL into a GitHub compare URL base.
+ * Handles HTTPS (https://github.com/owner/repo.git) and SSH (git@github.com:owner/repo.git).
+ * Returns null if the remote isn't GitHub or can't be parsed.
+ */
+export function getGitHubCompareUrl(cwd: string, baseBranch: string, headBranch: string): string | null {
+  try {
+    const remote = execSync('git remote get-url origin', { cwd, stdio: 'pipe' }).toString().trim();
+    let owner = '';
+    let repo = '';
+
+    // SSH: git@github.com:owner/repo.git
+    const sshMatch = remote.match(/github\.com[:/]([^/]+)\/([^/.]+)/);
+    // HTTPS: https://github.com/owner/repo.git
+    const httpsMatch = remote.match(/github\.com\/([^/]+)\/([^/.]+)/);
+
+    const match = sshMatch ?? httpsMatch;
+    if (!match) return null;
+
+    owner = match[1];
+    repo = match[2];
+
+    return `https://github.com/${owner}/${repo}/compare/${baseBranch}...${headBranch}`;
+  } catch {
+    return null;
+  }
+}
+
 // -- Git worktree helpers --
 
 export function ensureWorktreesIgnored(projectDir: string): void {

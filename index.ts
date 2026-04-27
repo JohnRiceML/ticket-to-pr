@@ -3,7 +3,7 @@ import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { CONFIG, REVIEW_OUTPUT_SCHEMA, DIFF_REVIEW_SCHEMA, isPro, type LockEntry, type TicketDetails, type ReviewOutput, type DiffReviewOutput } from './config.js';
-import { sleep, clamp, extractJsonFromOutput, shellEscape, loadEnv, parseEnvFile, createWorktree, removeWorktree, getDefaultBranch, validateNoBlockedFiles, readLearnings, appendLearning } from './lib/utils.js';
+import { sleep, clamp, extractJsonFromOutput, shellEscape, loadEnv, parseEnvFile, createWorktree, removeWorktree, getDefaultBranch, getGitHubCompareUrl, validateNoBlockedFiles, readLearnings, appendLearning } from './lib/utils.js';
 import { getProjectDir, getProjectNames, getBuildCommand, getBaseBranch, getBlockedFiles, getSkipPR, getDevAccess, getEnvFile } from './lib/projects.js';
 import {
   fetchTicketsByStatus,
@@ -855,6 +855,11 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
       log(GREEN, 'VALIDATE', 'No blocked file violations');
     }
 
+    // Guard: if no commits were made, skip push/PR entirely
+    if (commitCount === 0) {
+      throw new Error('Execute agent completed but made no commits — nothing to push. The agent may have misunderstood the ticket or decided no changes were needed.');
+    }
+
     // Push branch
     log(CYAN, 'PUSH', `Pushing ${branchName}`);
     execSync(`git push -u origin ${shellEscape(branchName)}`, { cwd: worktreeDir, stdio: 'pipe' });
@@ -884,14 +889,33 @@ async function runExecuteAgent(ticket: TicketDetails): Promise<void> {
         ].join('\n');
 
         const prResult = execSync(
-          `gh pr create --title ${shellEscape(ticket.title)} --body ${shellEscape(prBody)} --base ${shellEscape(baseBranch)} --head ${branchName}`,
+          `gh pr create --title ${shellEscape(ticket.title)} --body ${shellEscape(prBody)} --base ${shellEscape(baseBranch)} --head ${shellEscape(branchName)}`,
           { cwd: worktreeDir, stdio: 'pipe', timeout: 30_000 },
         );
         prUrl = prResult.toString().trim();
         log(GREEN, 'PR', `Created: ${prUrl}`);
       } catch (e) {
-        // PR creation is best-effort — don't fail the ticket over it
-        log(YELLOW, 'PR', `Failed to create PR: ${e instanceof Error ? e.message : e}`);
+        const errMsg = e instanceof Error ? e.message : String(e);
+        // If a PR already exists for this branch, try to grab its URL
+        if (errMsg.includes('already exists')) {
+          try {
+            const existing = execSync(`gh pr view ${shellEscape(branchName)} --json url -q .url`, { cwd: worktreeDir, stdio: 'pipe', timeout: 15_000 });
+            prUrl = existing.toString().trim();
+            log(GREEN, 'PR', `PR already exists: ${prUrl}`);
+          } catch {
+            log(YELLOW, 'PR', `PR already exists but couldn't retrieve URL`);
+          }
+        } else {
+          log(YELLOW, 'PR', `Failed to create PR: ${errMsg}`);
+        }
+        // Fallback: construct a GitHub compare URL so the user can open the PR manually
+        if (!prUrl) {
+          const compareUrl = getGitHubCompareUrl(worktreeDir, baseBranch, branchName);
+          if (compareUrl) {
+            prUrl = compareUrl;
+            log(YELLOW, 'PR', `Fallback: open PR manually → ${compareUrl}`);
+          }
+        }
       }
     }
 
@@ -1090,24 +1114,30 @@ async function poll(): Promise<void> {
       });
     }
 
-    // Post test checklists for Testing tickets (lightweight, no AI agent)
-    for (const ticket of pendingTesting) {
+    // Post test checklists for Testing tickets — serial, capped per poll to avoid spawn floods
+    const MAX_TESTING_PER_POLL = 3;
+    for (const ticket of pendingTesting.slice(0, MAX_TESTING_PER_POLL)) {
       if (shuttingDown) break;
       testingNotified.add(ticket.id);
       const details = await fetchTicketDetails(ticket.id);
-      postTestChecklist(details).catch((err) => {
+      try {
+        await postTestChecklist(details);
+      } catch (err) {
         log(YELLOW, 'TESTING', `Error posting checklist for "${details.title}": ${err instanceof Error ? err.message : err}`);
-      });
+      }
     }
 
-    // Process feedback for Done and Failed tickets (lightweight, doesn't count toward concurrency)
-    for (const ticket of pendingFeedback) {
+    // Process feedback for Done/Failed — serial, capped per poll. Each call spawns a Claude SDK query.
+    const MAX_FEEDBACK_PER_POLL = 3;
+    for (const ticket of pendingFeedback.slice(0, MAX_FEEDBACK_PER_POLL)) {
       if (shuttingDown) break;
       feedbackProcessed.add(ticket.id);
       const details = await fetchTicketDetails(ticket.id);
-      runFeedbackRetro(details, ticket.feedbackStatus).catch((err) => {
+      try {
+        await runFeedbackRetro(details, ticket.feedbackStatus);
+      } catch (err) {
         log(YELLOW, 'FEEDBACK', `Error processing feedback for "${details.title}": ${err instanceof Error ? err.message : err}`);
-      });
+      }
     }
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);

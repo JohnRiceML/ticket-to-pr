@@ -1,4 +1,4 @@
-import { Client } from '@notionhq/client';
+import { Client, LogLevel } from '@notionhq/client';
 import type {
   PageObjectResponse,
   BlockObjectResponse,
@@ -10,7 +10,18 @@ let _notion: Client | null = null;
 
 function notion(): Client {
   if (!_notion) {
-    _notion = new Client({ auth: process.env.NOTION_TOKEN });
+    _notion = new Client({
+      auth: process.env.NOTION_TOKEN,
+      logger: (level, message, extraInfo) => {
+        // trySetDate handles missing-property errors via try/catch, but the
+        // client logs a warn before throwing. Drop those — they're noise.
+        const errMsg = (extraInfo as { message?: string })?.message;
+        if (level === LogLevel.WARN && errMsg?.includes('is not a property that exists')) {
+          return;
+        }
+        console[level === LogLevel.ERROR ? 'error' : 'warn'](`@notionhq/client ${level}: ${message}`, extraInfo);
+      },
+    });
   }
   return _notion;
 }
@@ -310,7 +321,7 @@ export async function addComment(pageId: string, text: string): Promise<void> {
   try {
     await notion().comments.create({
       parent: { page_id: pageId },
-      rich_text: [{ text: { content: text } }],
+      rich_text: chunkRichText(text),
     });
   } catch (e) {
     // Best-effort: log but don't throw
@@ -360,8 +371,6 @@ async function hasBotMarker(pageId: string, marker: string): Promise<boolean> {
   try {
     const response = await notion().comments.list({ block_id: pageId });
     for (const comment of response.results) {
-      const createdBy = comment.created_by as { type?: string };
-      if (createdBy?.type !== 'bot') continue;
       const text = 'rich_text' in comment
         ? extractPlainText(comment.rich_text as RichTextItemResponse[])
         : '';
